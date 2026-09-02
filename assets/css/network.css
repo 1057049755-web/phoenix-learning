@@ -1,0 +1,38 @@
+/* 网络接入设置：保持本地优先，提供清晰的连接状态与迁移入口 */
+.page-head-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.fh-network-dialog { max-width: 560px; }
+.fh-network-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.fh-network-heading .dialog-title { margin-bottom: 5px; }
+.fh-network-heading p { max-width: 420px; margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.7; }
+.fh-network-kicker { display: block; margin-bottom: 4px; color: var(--primary); font-size: 10px; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
+.fh-network-mark { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border: 1px solid rgba(46, 116, 181, .15); border-radius: 14px; color: var(--primary); background: var(--primary-soft); font-size: 24px; line-height: 1; }
+.fh-network-status { display: flex; align-items: flex-start; gap: 10px; margin: 18px 0; padding: 13px 14px; border: 1px solid rgba(191, 151, 79, .2); border-radius: 13px; background: rgba(255, 249, 237, .85); }
+.fh-network-status.is-online { border-color: rgba(56, 145, 105, .2); background: rgba(239, 250, 244, .88); }
+.fh-network-status-dot { width: 9px; height: 9px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 4px rgba(191, 151, 79, .12); }
+.fh-network-status-dot.is-online { background: var(--green); box-shadow: 0 0 0 4px rgba(56, 145, 105, .12); }
+.fh-network-status strong { display: block; color: var(--ink); font-size: 13px; }
+.fh-network-status p { margin: 4px 0 0; color: var(--text-2); font-size: 11px; line-height: 1.6; }
+.fh-network-dialog .field { margin-bottom: 14px; }
+.fh-network-route { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 5px 0 18px; padding: 10px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-2); background: var(--bg); font-size: 10px; text-align: center; }
+.fh-network-route i { color: var(--primary); font-style: normal; }
+.fh-network-dialog .dialog-actions { flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .page-head-actions { width: 100%; }
+  .page-head-actions .btn { flex: 1 1 140px; }
+  .fh-network-dialog { width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0; }
+  .fh-network-heading p { max-width: none; }
+  .fh-network-route { align-items: stretch; flex-direction: column; gap: 3px; }
+  .fh-network-route i { transform: rotate(90deg); }
+  .fh-network-dialog .dialog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fh-network-dialog .dialog-actions .btn:first-child { grid-column: 1 / -1; }
+  .fh-network-dialog .dialog-actions .btn { min-width: 0; }
+}
+
+@media (max-width: 390px) {
+  .fh-network-heading { gap: 9px; }
+  .fh-network-mark { width: 36px; height: 36px; border-radius: 11px; font-size: 20px; }
+  .fh-network-status { margin: 13px 0; }
+  .fh-network-dialog .dialog-actions { grid-template-columns: 1fr; }
+  .fh-network-dialog .dialog-actions .btn:first-child { grid-column: auto; }
+}

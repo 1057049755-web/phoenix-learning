@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111a43">
+  <meta name="description" content="凤凰花·智学本地启动入口：选择学生端、教师端或管理端">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="凤凰花·智学">
+  <title>凤凰花·智学｜启动入口</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="assets/brand/favicon-64.png">
+  <link rel="stylesheet" href="assets/css/entry-index.css">
+</head>
+<body>
+  <a class="fh-portal-skip" href="#fh-portal-entries">跳到入口选择</a>
+
+  <header class="fh-portal-bar">
+    <div class="fh-portal-wrap fh-portal-bar__inner">
+      <a class="fh-portal-brand" href="index.html" aria-label="凤凰花智学启动入口">
+        <span class="fh-portal-brand__mark"><img src="assets/brand/logo-blue-transparent.png" alt=""></span>
+        <span><strong>凤凰花·智学</strong><small>LOCAL LEARNING SPACE</small></span>
+      </a>
+      <div class="fh-portal-bar__right">
+        <span class="fh-portal-locality"><i></i>本机优先 · 入口索引</span>
+        <a class="fh-portal-team-link" href="team-index.html">认识团队 <span aria-hidden="true">↗</span></a>
+        <button class="fh-portal-config-link" type="button" data-open-config>配置三端</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="fh-portal-main">
+    <section class="fh-portal-hero" aria-labelledby="fh-portal-title">
+      <div class="fh-portal-wrap fh-portal-hero__grid">
+        <div class="fh-portal-hero__copy">
+          <p class="fh-portal-kicker"><span></span>START HERE / 2026</p>
+          <h1 id="fh-portal-title">从你的角色，<br><em>开始今天的学习。</em></h1>
+          <p class="fh-portal-hero__lead">凤凰花·智学把同一套学习、教学与管理能力，整理成三个清晰入口。先选身份，再去做今天最重要的事。</p>
+          <div class="fh-portal-hero__actions">
+            <a class="fh-portal-button fh-portal-button--primary" href="workbench.html#/login?role=teacher" data-entry-key="teacher">进入教师端 <span aria-hidden="true">↗</span></a>
+            <a class="fh-portal-button fh-portal-button--line" href="#fh-portal-entries">选择其他端口 <span aria-hidden="true">↓</span></a>
+          </div>
+          <div class="fh-portal-hero__note"><span class="fh-portal-note-icon">✦</span><span>默认进入本地工作台；以后配置独立地址即可切换。</span></div>
+        </div>
+
+        <div class="fh-portal-hero__visual" aria-label="凤凰花智学学习场景">
+          <div class="fh-portal-art">
+            <img src="assets/brand/generated/learning-worlds.png" alt="三个连接在一起的学习世界：观测、阅读与创造" loading="eager">
+            <div class="fh-portal-art__shade"></div>
+            <div class="fh-portal-art__caption"><span>ONE PURPOSE</span><strong>让每一次学习<br>都有下一步。</strong></div>
+          </div>
+          <div class="fh-portal-orbit fh-portal-orbit--one"><span>01</span> 看见问题</div>
+          <div class="fh-portal-orbit fh-portal-orbit--two"><span>02</span> 留下证据</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="fh-portal-entries" id="fh-portal-entries" aria-labelledby="fh-portal-entries-title">
+      <div class="fh-portal-wrap">
+        <div class="fh-portal-section-head">
+          <div><p class="fh-portal-eyebrow">01 / 选择入口</p><h2 id="fh-portal-entries-title">你今天要<br>从哪里开始？</h2></div>
+          <p>三个端口各自只显示与你有关的任务。没有配置独立地址时，会安全地进入现有统一工作台，并自动预选对应身份。</p>
+        </div>
+
+        <div class="fh-portal-entry-grid">
+          <article class="fh-portal-entry-card fh-portal-entry-card--student">
+            <div class="fh-portal-entry-card__head"><span class="fh-portal-entry-card__num">01</span><span class="fh-portal-entry-card__type">STUDENT</span></div>
+            <div class="fh-portal-entry-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.4-3.2 3.1-5.3 7-5.3s6.6 2.1 7 5.3"/><path d="M4 4h3M17 4h3"/></svg></div>
+            <h3>学生端</h3><p>知识点、错题本和今日计划，陪你把“不会”拆成下一步。</p>
+            <a class="fh-portal-entry-card__button" href="workbench.html#/login?role=student" data-entry-key="student">进入学生端 <span aria-hidden="true">↗</span></a>
+            <span class="fh-portal-entry-card__status" data-entry-status="student">使用本地工作台 · 学生身份</span>
+          </article>
+
+          <article class="fh-portal-entry-card fh-portal-entry-card--teacher fh-portal-entry-card--featured">
+            <span class="fh-portal-featured">推荐起点</span>
+            <div class="fh-portal-entry-card__head"><span class="fh-portal-entry-card__num">02</span><span class="fh-portal-entry-card__type">TEACHER</span></div>
+            <div class="fh-portal-entry-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19.5V5.8c0-.9.7-1.6 1.6-1.6H19v15.3H5.6c-.9 0-1.6-.7-1.6-1.6Z"/><path d="M7.5 7.5h8M7.5 11h8M7.5 14.5h4"/><path d="M19 4.2v15.3"/></svg></div>
+            <h3>教师端</h3><p>从备课、组卷或批改开始，把经验变成可追踪的教学行动。</p>
+            <a class="fh-portal-entry-card__button" href="workbench.html#/login?role=teacher" data-entry-key="teacher">进入教师端 <span aria-hidden="true">↗</span></a>
+            <span class="fh-portal-entry-card__status" data-entry-status="teacher">使用本地工作台 · 教师身份</span>
+          </article>
+
+          <article class="fh-portal-entry-card fh-portal-entry-card--admin">
+            <div class="fh-portal-entry-card__head"><span class="fh-portal-entry-card__num">03</span><span class="fh-portal-entry-card__type">ADMIN</span></div>
+            <div class="fh-portal-entry-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V6.5L12 3l8 3.5V20"/><path d="M8 20v-5h8v5M8 9h.01M12 9h.01M16 9h.01"/><path d="M2 20h20"/></svg></div>
+            <h3>管理端</h3><p>成员、班级、资源和服务，维持学校协同的清晰秩序。</p>
+            <a class="fh-portal-entry-card__button" href="workbench.html#/login?role=admin" data-entry-key="admin">进入管理端 <span aria-hidden="true">↗</span></a>
+            <span class="fh-portal-entry-card__status" data-entry-status="admin">使用本地工作台 · 管理员身份</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="fh-portal-guide" aria-labelledby="fh-portal-guide-title">
+      <div class="fh-portal-wrap fh-portal-guide__grid">
+        <div><p class="fh-portal-eyebrow">02 / 第一次使用</p><h2 id="fh-portal-guide-title">三件事，<br>就够开始。</h2></div>
+        <ol class="fh-portal-guide__steps">
+          <li><b>01</b><div><strong>选择身份</strong><span>先进入和你有关的端口。</span></div></li>
+          <li><b>02</b><div><strong>完成一个任务</strong><span>从今日计划、待批改或待处理开始。</span></div></li>
+          <li><b>03</b><div><strong>留下下一步</strong><span>保存、复核或记录，让进度不丢失。</span></div></li>
+        </ol>
+        <a class="fh-portal-guide__link" href="team-index.html"><span>想先了解项目与团队？</span><strong>查看完整团队索引 ↗</strong></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="fh-portal-footer">
+    <div class="fh-portal-wrap fh-portal-footer__inner">
+      <span>凤凰花·智学 / LOCAL FIRST</span>
+      <span>原有工作台入口：<a href="workbench.html#/login">workbench.html ↗</a></span>
+      <button type="button" data-open-config>配置三端地址</button>
+    </div>
+  </footer>
+
+  <dialog class="fh-portal-dialog" id="fh-portal-dialog" aria-labelledby="fh-portal-dialog-title">
+    <form class="fh-portal-dialog__card" method="dialog" data-portal-config-form>
+      <div class="fh-portal-dialog__head"><div><p class="fh-portal-eyebrow">入口配置</p><h2 id="fh-portal-dialog-title">把三个端口<br>放到这里。</h2></div><button class="fh-portal-dialog__close" type="button" data-close-config aria-label="关闭配置窗口">×</button></div>
+      <p class="fh-portal-dialog__hint">支持完整 URL、局域网地址或内部路径。留空时默认进入本地统一工作台；地址仅保存于当前浏览器。</p>
+      <div class="fh-portal-dialog__fields">
+        <label><span>学生端位置</span><input type="text" data-portal-input="student" placeholder="例如：workbench.html#/login?role=student"></label>
+        <label><span>教师端位置</span><input type="text" data-portal-input="teacher" placeholder="例如：workbench.html#/login?role=teacher"></label>
+        <label><span>管理端位置</span><input type="text" data-portal-input="admin" placeholder="例如：workbench.html#/login?role=admin"></label>
+      </div>
+      <div class="fh-portal-dialog__actions"><button class="fh-portal-button fh-portal-button--line" type="button" data-clear-portal-config>恢复默认</button><button class="fh-portal-button fh-portal-button--primary" type="submit">保存配置</button></div>
+    </form>
+  </dialog>
+
+  <div class="fh-portal-toast" role="status" aria-live="polite" data-portal-toast></div>
+  <script src="assets/js/entry-index.js"></script>
+</body>
+</html>
