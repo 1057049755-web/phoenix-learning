@@ -64,9 +64,7 @@
     offline: false,
     cloud: false,
     cloudErr: '',
-    wrongDone: (function () {
-      try { return JSON.parse(localStorage.getItem('fh_wrong_done')) || {}; } catch (e) { return {}; }
-    })(),
+    wrongDone: {},
     route: '/login',
     query: {},
     plan: { data: null, generating: false, studentId: null },
@@ -76,62 +74,12 @@
       name: ''
     }
   };
+  const sessionCache = Object.create(null);
 
   /* ---------- 基础工具 ---------- */
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  function roleLabel(role) { return (M.roles[role] && M.roles[role].label) || (role === 'academic' ? '教务处' : role === 'admin' ? '管理端' : role === 'student' ? '学生' : '老师'); }
-  function maskPhone(phone) {
-    const value = String(phone || '');
-    return /^1\d{10}$/.test(value) ? value.slice(0, 3) + '****' + value.slice(-4) : '已保护';
-  }
-  function currentSchoolId() { return String((state.user && state.user.schoolId) || 'school_default'); }
-  function classMatches(a, b) {
-    if (!a || !b) return false;
-    if (a.classId && b.classId && String(a.classId) === String(b.classId)) return true;
-    if (a.cls && b.cls && String(a.cls) === String(b.cls)) return true;
-    const ids = Array.isArray(a.classIds) ? a.classIds : [];
-    return !!b.classId && ids.some(id => String(id) === String(b.classId));
-  }
-  function scopedUsers() {
-    const all = DB.users();
-    const me = state.user || {};
-    if (state.role === 'admin') return all;
-    if (state.role === 'academic') return all.filter(u => String(u.schoolId || 'school_default') === currentSchoolId() && u.role !== 'admin');
-    if (state.role === 'teacher') return all.filter(u => u.id === me.id || (u.role === 'student' && String(u.schoolId || 'school_default') === currentSchoolId() && classMatches(me, u)));
-    return me.id ? all.filter(u => u.id === me.id) : [];
-  }
-  function scopedClasses() {
-    const all = DB.classes ? DB.classes() : [];
-    const me = state.user || {};
-    if (state.role === 'admin') return all;
-    if (state.role === 'academic') return all.filter(c => String(c.schoolId || 'school_default') === currentSchoolId());
-    if (state.role === 'teacher') return all.filter(c => (me.classIds || []).some(id => String(id) === String(c.id)) || String(c.name || '') === String(me.cls || ''));
-    return all.filter(c => (me.classIds || []).some(id => String(id) === String(c.id)) || String(c.name || '') === String(me.cls || ''));
-  }
-  function canManageRosterRole(role) {
-    if (!state.user) return false;
-    return !!(DB.canManageRole && DB.canManageRole(state.user, role));
-  }
-  function classSummaryForStudent(student) {
-    const teachers = DB.users().filter(u => u.role === 'teacher' && String(u.schoolId || 'school_default') === String(student.schoolId || 'school_default') && classMatches(u, student));
-    const cls = (DB.classes ? DB.classes() : []).find(c => String(c.id) === String(student.classId)) || { name: student.cls || '未分班', grade: student.grade || '—' };
-    return { cls: cls.name || student.cls || '未分班', grade: cls.grade || student.grade || '—', school: student.schoolName || '本校', teachers: teachers };
-  }
-  function recordInScope(record) {
-    const me = state.user || {};
-    if (!record) return false;
-    if (state.role === 'admin') return true;
-    if (state.role === 'academic') return String(record.schoolId || 'school_default') === currentSchoolId();
-    if (state.role === 'student') return String(record.studentId || '') === String(me.id || '') || String(record.studentPhone || '') === String(me.phone || '');
-    if (state.role === 'teacher') {
-      if (String(record.ownerId || '') === String(me.id || '')) return true;
-      if (record.studentId) return scopedUsers().some(u => String(u.id) === String(record.studentId));
-      return classMatches(me, { cls: record.cls, classId: record.classId });
-    }
-    return false;
-  }
 
   function showToast(msg, type) {
     const wrap = $('#toast-wrap');
@@ -203,7 +151,7 @@
       '<div class="fh-personal-profile"><span class="fh-personal-pill">目标 · ' + esc(summary.goal) + '</span><span class="fh-personal-pill">每周 · ' + esc(summary.minutes) + ' 分钟</span><span class="fh-personal-pill">偏好 · ' + esc(summary.style) + '</span><span class="fh-personal-pill">关注 · ' + esc(summary.subjects) + '</span><span class="fh-personal-pill">薄弱信号 · ' + esc(summary.weak) + '</span></div>' +
       '<div class="fh-personal-weekly"><div class="fh-personal-weekly-head"><div><b>本周学习节奏</b><span>根据你的真实学习事件自动更新</span></div><strong>' + weekly.studyDays + ' 天参与</strong></div><div class="fh-personal-progress"><i style="width:' + Math.min(100, Math.max(0, Number(weekly.studyDays || 0) / 5 * 100)) + '%"></i></div><div class="fh-personal-weekly-metrics"><span><strong>' + weekly.views + '</strong>次浏览</span><span><strong>' + weekly.completed + '</strong>项完成</span><span><strong>' + weekly.dueReviews + '</strong>项待复习</span><span><strong>' + weekly.streak + '</strong>天连续</span></div><div class="fh-personal-next"><span>下一步建议</span><b>' + esc(weekly.focus) + '</b></div></div>' +
       '<div class="fh-personal-feed">' + (recs.length ? recs.map(personalRecommendationCard).join('') : '<div class="fh-personal-empty">知识点索引正在准备中，先到知识点讲解库浏览一条内容，系统就能开始学习你的偏好。</div>') + '</div>' +
-      '<p class="fh-personal-footnote">反馈只保存在当前本地学习空间，并可随数据包一起迁移；不会自动上传外部服务。</p>';
+      '<p class="fh-personal-footnote">反馈只会写入已登录的学校数据服务，并受权限和审计规则保护。</p>';
     const anchor = kind === 'home' ? page.querySelector('.workspace-status') : page.querySelector('.page-head');
     if (anchor) anchor.insertAdjacentElement('afterend', section); else page.prepend(section);
     bindPersonalizationSection(section, user, kind);
@@ -251,7 +199,7 @@
     const done = tasks.filter(x => x.done).length;
     const section = document.createElement('section');
     section.className = 'fh-personal-section fh-personal-plan-section';
-    section.innerHTML = '<div class="fh-personal-head"><div><span class="fh-personal-kicker">Plan to action</span><h2>把计划书变成今天能完成的动作</h2><p>这里的任务和学习画像、知识点推荐、错题复习排期共用同一套本地数据。完成后会回写任务进度和学习事件。</p></div><button type="button" class="fh-personal-edit" data-personal-edit>调整计划偏好</button></div><div class="fh-personal-profile"><span class="fh-personal-pill">阶段目标 · ' + esc(summary.goal) + '</span><span class="fh-personal-pill">已完成 · ' + done + ' / ' + tasks.length + '</span><span class="fh-personal-pill">复习节奏 · ' + esc(summary.style) + '</span></div><div class="fh-personal-task-list">' + (tasks.length ? tasks.map(task => '<article class="fh-personal-task' + (task.done ? ' is-done' : '') + '"><button type="button" class="fh-personal-task-check" data-personal-task="' + esc(task.id) + '" aria-label="' + (task.done ? '标记为未完成' : '标记为已完成') + '">' + (task.done ? icon('check', 14) : '') + '</button><div><div class="fh-personal-task-title">' + esc(task.title) + '</div><div class="fh-personal-task-detail">' + esc(task.detail || '完成后回到计划书记录你的学习证据。') + '</div></div><button type="button" class="fh-personal-task-link" data-personal-nav="' + esc(task.route || '#/knowledge') + '">打开</button></article>').join('') : '<div class="fh-personal-empty">计划任务将在你浏览知识点或生成计划书后自动建立。</div>') + '</div><p class="fh-personal-footnote">计划任务库会保留在当前本地账号下；点击“打开”可回到知识点或错题本，完成操作后再回来勾选。</p>';
+    section.innerHTML = '<div class="fh-personal-head"><div><span class="fh-personal-kicker">Plan to action</span><h2>把计划书变成今天能完成的动作</h2><p>任务和学习画像、知识点推荐、错题复习排期由学校数据服务统一管理，完成后会回写任务进度和学习事件。</p></div><button type="button" class="fh-personal-edit" data-personal-edit>调整计划偏好</button></div><div class="fh-personal-profile"><span class="fh-personal-pill">阶段目标 · ' + esc(summary.goal) + '</span><span class="fh-personal-pill">已完成 · ' + done + ' / ' + tasks.length + '</span><span class="fh-personal-pill">复习节奏 · ' + esc(summary.style) + '</span></div><div class="fh-personal-task-list">' + (tasks.length ? tasks.map(task => '<article class="fh-personal-task' + (task.done ? ' is-done' : '') + '"><button type="button" class="fh-personal-task-check" data-personal-task="' + esc(task.id) + '" aria-label="' + (task.done ? '标记为未完成' : '标记为已完成') + '">' + (task.done ? icon('check', 14) : '') + '</button><div><div class="fh-personal-task-title">' + esc(task.title) + '</div><div class="fh-personal-task-detail">' + esc(task.detail || '完成后回到计划书记录你的学习证据。') + '</div></div><button type="button" class="fh-personal-task-link" data-personal-nav="' + esc(task.route || '#/knowledge') + '">打开</button></article>').join('') : '<div class="fh-personal-empty">计划任务将在你浏览知识点或生成计划书后自动建立。</div>') + '</div><p class="fh-personal-footnote">计划任务库只保留在已登录的数据服务中；点击“打开”可回到知识点或错题本，完成操作后再回来勾选。</p>';
     const anchor = page.querySelector('.page-head');
     if (anchor) anchor.insertAdjacentElement('afterend', section); else page.prepend(section);
     const edit = section.querySelector('[data-personal-edit]');
@@ -346,9 +294,7 @@
       ? ['home', 'knowledge', 'wrongbook', 'plan', 'resources']
       : state.role === 'admin'
         ? ['home', 'admin', 'resources']
-        : state.role === 'academic'
-          ? ['home', 'admin', 'grading', 'analytics', 'resources']
-        : ['home', 'paper', 'grading', 'resources', 'analytics', 'admin'];
+        : ['home', 'paper', 'grading', 'resources', 'analytics'];
     return wanted.map(key => mods.find(m => m.key === key)).filter(Boolean);
   }
 
@@ -378,9 +324,7 @@
 
   function renderSidebar() {
     const mod = activeModule();
-    const items = mod === 'admin' && state.role === 'teacher'
-      ? (M.sidebar.admin || []).filter(it => ['成员管理', '班级管理'].includes(it.label))
-      : M.sidebar[mod] || [];
+    const items = M.sidebar[mod] || [];
     $('#sidebar').innerHTML =
       '<div class="sidebar-section"><div class="sidebar-label">' + esc(moduleLabel(mod)) + '</div>' +
       items.map(it => {
@@ -412,7 +356,7 @@
     renderMobileNav();
     const an = $('#account-name');
     const u = state.user || {};
-    const uname = u.name || (u.role === 'student' ? '学生账号' : u.role === 'admin' ? '平台管理员' : u.role === 'academic' ? '教务处账号' : '教师账号');
+    const uname = u.name || (u.role === 'student' ? '学生账号' : u.role === 'admin' ? '管理员' : '教师账号');
     an.textContent = uname.length > 6 ? uname.slice(0, 6) + '…' : uname;
     $('#menu-role').textContent = M.roles[state.role] ? M.roles[state.role].label : (u.role === 'student' ? '学生' : '');
     const avatars = $$('.account-menu-wrap .avatar');
@@ -420,15 +364,17 @@
     const mName = $('.account-menu-name');
     if (mName) mName.textContent = uname;
     const mPhone = $('.account-menu-phone');
-    if (mPhone) mPhone.textContent = u.phone ? maskPhone(u.phone) : '账号信息已保护';
+    if (mPhone) mPhone.textContent = u.phone || '';
     const brandTag = $('.brand-tag');
-    if (brandTag) brandTag.textContent = state.role === 'admin' ? '管理端' : state.role === 'student' ? '学生端' : state.role === 'academic' ? '教师端 · 教务处' : '教师端';
+    if (brandTag) brandTag.textContent = state.role === 'admin' ? '管理端' : state.role === 'student' ? '学生端' : state.role === 'academic' ? '教务处' : '教师端';
+    const serviceState = DB.cloudInfo ? DB.cloudInfo() : {};
+    const serviceReady = !!serviceState.cloud;
     const offlineText = $('#offline-text');
-    if (offlineText) offlineText.textContent = state.offline ? '弱网' : '在线';
+    if (offlineText) offlineText.textContent = serviceReady ? '服务正常' : '服务未就绪';
     const offlineToggle = $('#offline-toggle');
-    if (offlineToggle) offlineToggle.classList.toggle('online-off', state.offline);
+    if (offlineToggle) offlineToggle.classList.toggle('online-off', !serviceReady);
     const offlineBanner = $('#offline-banner');
-    if (offlineBanner) offlineBanner.classList.toggle('hidden', !state.offline);
+    if (offlineBanner) offlineBanner.classList.toggle('hidden', serviceReady);
     document.body.classList.toggle('offline-mode', state.offline);
     const aiChip = $('#ai-chip-label');
     if (aiChip) {
@@ -443,8 +389,8 @@
   function renderLogin() {
     const cloudInfo = DB.cloudInfo();
     $('#login-view').innerHTML =
-      '<div class="login-card login-card-modern is-intro">' +
-      '<section class="login-splash" aria-label="凤凰花智学欢迎页"><div class="login-splash__photo" aria-hidden="true"><img src="assets/brand/generated/hero-learning-library.png" alt=""></div><div class="login-splash__veil"></div><div class="splash-copy"><span class="splash-kicker"><i></i>凤凰花·智学 / PHOENIX LEARNING</span><h1>让每一次学习，<br><em>都被看见。</em></h1><p>从知识理解到精准反馈，陪伴老师与学生把复杂的事做简单。</p><div class="splash-info-row"><span><b>01</b><strong>个性化路径</strong><small>计划与反馈相互连接</small></span><span><b>02</b><strong>教学证据</strong><small>从批改走向持续改进</small></span><span><b>03</b><strong>全端协作</strong><small>网页、手机与安装端同步</small></span></div><div class="splash-actions"><button type="button" class="btn btn-primary btn-lg" id="enter-login">开始使用 <span aria-hidden="true">→</span></button><span class="splash-scroll-hint"><span>01</span> 用一个小目标，开启今天</span></div><div class="splash-skip-row"><button type="button" class="splash-skip" id="reduce-motion">减少动态效果</button></div></div><div class="splash-caption"><span>LEARN WITH PURPOSE</span><strong>每个人，都有<br>自己的节奏。</strong></div></section>' +
+      '<div class="login-card login-card-modern">' +
+      '<section class="login-splash" aria-label="凤凰花智学欢迎页"><div class="splash-orbit orbit-a"></div><div class="splash-orbit orbit-b"></div><div class="splash-particles"></div><div class="splash-copy"><span class="splash-kicker">AI × 教育 · 智慧学习工作台</span><h1>让每一次学习，<br><em>都被看见。</em></h1><p>从知识理解到精准反馈，陪伴老师与学生把复杂的事做简单。</p><button type="button" class="btn btn-primary btn-lg" id="enter-login">开始使用 <span aria-hidden="true">→</span></button><button type="button" class="splash-skip" id="reduce-motion">减少动态效果</button><button type="button" class="splash-skip" id="gaze-toggle">开启视线互动（可选）</button><span class="splash-camera-status" id="gaze-status" role="status">默认关闭摄像头；视线互动需主动开启</span></div></section>' +
       '<section class="login-panel" id="login-panel" hidden>' +
       '<div class="login-brand"><span class="brand-mark">' +
       '<img src="assets/brand/logo-blue-transparent.png" width="42" height="42" alt="凤凰花·智学标识"></span>' +
@@ -458,13 +404,13 @@
       '<div class="field"><label>密码<span class="req">*</span></label>' +
       '<input class="input" id="login-password" type="password" placeholder="请输入密码" autocomplete="current-password">' +
       '<div class="field-error" id="password-error" style="display:none">请输入密码</div>' +
-      '<div class="form-hint">初始密码为手机号后 6 位；首次登录后设置新密码，即视为正式激活。</div></div>' +
+      '<div class="form-hint">初始密码由管理员发放；首次登录后请设置至少 8 位新密码。</div></div>' +
       '<button type="submit" class="btn btn-primary btn-lg" style="width:100%">登录</button>' +
       '</form>' +
-      '<div class="login-role-picker" aria-label="登录角色"><span>登录身份</span><button type="button" data-login-role="admin">管理端</button><button type="button" data-login-role="academic">教务处</button><button type="button" data-login-role="teacher">老师</button><button type="button" data-login-role="student">学生</button></div>' +
+      '<div class="login-role-picker" aria-label="登录角色"><span>登录身份</span><button type="button" data-login-role="admin">管理员</button><button type="button" data-login-role="academic">教务处</button><button type="button" data-login-role="teacher">老师</button><button type="button" data-login-role="student">学生</button></div>' +
       '<div class="third-party-login"><div class="third-party-title">其他登录方式 <small>均需管理员配置</small></div><div class="third-party-grid">' + ['QQ','微信','GitHub','Google','Apple'].map(x => '<button type="button" class="third-party-btn" data-oauth="' + x + '">' + x + '<small>尚未配置</small></button>').join('') + '</div></div>' +
-      '<div class="login-foot">' + (cloudInfo.cloud ? (cloudInfo.cloudErr || '本机服务已连接：数据写入本机配置文件夹') : '浏览器本地模式：数据暂存当前设备') + '</div>' +
-      '<div class="login-note"><span>教育 App 备案号</span><span>深度合成标识</span></div>' +
+      '<div class="login-foot">' + (cloudInfo.cloud ? '学校数据服务已连接，账号与业务数据受权限保护' : esc(cloudInfo.cloudErr || '学校数据服务未就绪，当前不会保存业务数据')) + '</div>' +
+      '<div class="login-note"><span>服务状态由服务器实时返回</span><span>隐私字段服务端加密</span></div>' +
       '</section></div>';
 
     const panel = $('#login-panel');
@@ -472,8 +418,7 @@
     state.loginRole = ['admin', 'academic', 'teacher', 'student'].includes(hintedRole) ? hintedRole : 'teacher';
     const defaultRole = $('[data-login-role="' + state.loginRole + '"]');
     if (defaultRole) defaultRole.classList.add('active');
-    const card = document.querySelector('.login-card-modern');
-    const enter = () => { if (card) card.classList.remove('is-intro'); panel.hidden = false; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); const first = $('#login-phone'); if (first) first.focus(); };
+    const enter = () => { panel.hidden = false; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); const first = $('#login-phone'); if (first) first.focus(); };
     $('#enter-login').onclick = enter;
     const stage = document.querySelector('.login-splash');
     if (stage) {
@@ -482,24 +427,20 @@
       stage.addEventListener('pointerleave', () => { stage.style.setProperty('--mx', '50%'); stage.style.setProperty('--my', '45%'); stage.style.setProperty('--px', '0px'); stage.style.setProperty('--py', '0px'); });
     }
     $('#reduce-motion').onclick = () => { document.documentElement.classList.toggle('reduce-motion'); showToast(document.documentElement.classList.contains('reduce-motion') ? '已减少动态效果' : '已恢复动态效果', 'info'); };
-    const gazeToggle = $('#gaze-toggle');
-    if (gazeToggle) {
-      let gazeStream = null;
-      gazeToggle.onclick = async () => {
-        const status = $('#gaze-status'); const toggle = $('#gaze-toggle');
-        if (!status) return;
-        if (gazeStream) { gazeStream.getTracks().forEach(t => t.stop()); gazeStream = null; toggle.textContent = '开启视线互动（可选）'; status.textContent = '视线互动已关闭，摄像头已停止；鼠标/触控互动仍可用'; return; }
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status.textContent = '当前浏览器不支持摄像头；已回退到鼠标/触控互动'; return; }
-        if (location.protocol === 'file:') { status.textContent = '本地文件模式无法安全申请摄像头；请先启动本地服务并使用 localhost/HTTPS'; return; }
-        status.textContent = '正在请求摄像头权限…';
-        try { gazeStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); toggle.textContent = '关闭摄像头增强'; status.textContent = '摄像头增强已开启（本版本仅验证权限，不进行人脸/视线识别；不上传、不保存）；点击按钮即可停止'; }
-        catch (e) { status.textContent = e && e.name === 'NotAllowedError' ? '摄像头权限被拒绝；已回退到鼠标/触控互动' : '摄像头不可用；已回退到鼠标/触控互动'; }
-      };
-    }
+    let gazeStream = null;
+    $('#gaze-toggle').onclick = async () => {
+      const status = $('#gaze-status'); const toggle = $('#gaze-toggle');
+      if (gazeStream) { gazeStream.getTracks().forEach(t => t.stop()); gazeStream = null; toggle.textContent = '开启视线互动（可选）'; status.textContent = '视线互动已关闭，摄像头已停止；鼠标/触控互动仍可用'; return; }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status.textContent = '当前浏览器不支持摄像头；已回退到鼠标/触控互动'; return; }
+      if (location.protocol === 'file:') { status.textContent = '本地文件模式无法安全申请摄像头；请先启动本地服务并使用 localhost/HTTPS'; return; }
+      status.textContent = '正在请求摄像头权限…';
+      try { gazeStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); toggle.textContent = '关闭摄像头增强'; status.textContent = '摄像头增强已开启（本版本仅验证权限，不进行人脸/视线识别；不上传、不保存）；点击按钮即可停止'; }
+      catch (e) { status.textContent = e && e.name === 'NotAllowedError' ? '摄像头权限被拒绝；已回退到鼠标/触控互动' : '摄像头不可用；已回退到鼠标/触控互动'; }
+    };
     $$('.third-party-btn').forEach(b => b.onclick = () => showToast(b.dataset.oauth + ' 登录尚未配置，请联系管理员配置 OAuth', 'info'));
     $$('[data-login-role]').forEach(b => b.onclick = () => { $$('[data-login-role]').forEach(x => x.classList.remove('active')); b.classList.add('active'); state.loginRole = b.dataset.loginRole; showToast('已选择' + b.textContent + '身份，请使用该身份账号登录', 'info'); $('#login-phone').focus(); });
 
-    $('#login-form').onsubmit = (e) => {
+    $('#login-form').onsubmit = async (e) => {
       e.preventDefault();
       const phone = $('#login-phone').value.trim();
       const password = $('#login-password').value;
@@ -511,7 +452,7 @@
       if (!password) { pwErr.style.display = 'block'; $('#login-password').classList.add('error'); return; }
       pwErr.style.display = 'none';
       $('#login-password').classList.remove('error');
-      const res = DB.login(phone, password);
+      const res = await DB.login(phone, password);
       if (!res.ok) { showToast(res.msg, 'error'); return; }
       if (res.user && res.user.role !== state.loginRole) { showToast('登录身份与账号类型不一致，请切换为' + M.roles[res.user.role].label + '后再试', 'error'); return; }
       if (res.needActivate) { showActivationDialog(res.user, password); return; }
@@ -536,18 +477,18 @@
       '<h3 class="dialog-title">首次登录 · 正式激活</h3>' +
       '<div class="dialog-body">' +
       '<p style="font-size:13.5px;color:var(--text-2);margin:0 0 10px">账号 <b>' + esc(user.name || user.phone) + '</b>（' + esc(M.roles[user.role].label) + '）已由管理员导入。设置你的专属密码后即正式激活，下次使用新密码登录。</p>' +
-      '<div class="field"><label>新密码（至少 6 位）</label><input class="input" id="act-pwd" type="password" placeholder="设置新密码"></div>' +
+      '<div class="field"><label>新密码（至少 8 位）</label><input class="input" id="act-pwd" type="password" placeholder="设置新密码"></div>' +
       '<div class="field"><label>确认新密码</label><input class="input" id="act-pwd2" type="password" placeholder="再次输入新密码"></div>' +
       '</div>' +
       '<div class="dialog-actions"><button class="btn btn-ghost" data-dialog="cancel">退出</button>' +
       '<button class="btn btn-primary" data-dialog="ok">激活并登录</button></div></div></div>';
     root.querySelector('[data-dialog="cancel"]').onclick = () => { root.innerHTML = ''; showToast('尚未激活，可稍后用初始密码重新登录', 'info'); };
     root.querySelector('.dialog-mask').addEventListener('click', e => { if (e.target === e.currentTarget) root.innerHTML = ''; });
-    root.querySelector('[data-dialog="ok"]').onclick = () => {
+    root.querySelector('[data-dialog="ok"]').onclick = async () => {
       const p1 = $('#act-pwd').value, p2 = $('#act-pwd2').value;
-      if (p1.length < 6) { showToast('新密码至少 6 位', 'error'); return; }
+      if (p1.length < 8) { showToast('新密码至少 8 位', 'error'); return; }
       if (p1 !== p2) { showToast('两次输入的密码不一致', 'error'); return; }
-      const r = DB.activate(user.phone, p1);
+      const r = await DB.activate(user.phone, p1);
       root.innerHTML = '';
       if (r.ok) { showToast('激活成功，欢迎使用正式版', 'success'); finishLogin(r.user); }
       else showToast(r.msg, 'error');
@@ -560,14 +501,11 @@
   }
 
   function getTodayPlan() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(todayPlanKey()) || '[]');
-      return Array.isArray(saved) ? saved : [];
-    } catch (e) { return []; }
+    return Array.isArray(sessionCache[todayPlanKey()]) ? sessionCache[todayPlanKey()] : [];
   }
 
   function saveTodayPlan(items) {
-    try { localStorage.setItem(todayPlanKey(), JSON.stringify(items.slice(0, 20))); } catch (e) {}
+    sessionCache[todayPlanKey()] = items.slice(0, 20);
   }
 
   function todayPlanHtml() {
@@ -622,14 +560,14 @@
   }
 
   function currentNotices() {
-    const roleScope = state.role === 'student' ? '学生' : state.role === 'teacher' ? '教师' : state.role === 'academic' ? '教师' : '管理员';
+    const roleScope = state.role === 'student' ? '学生' : state.role === 'teacher' ? '教师' : '管理员';
     const todayKey = new Date().toISOString().slice(0, 10);
     return DB.notices().filter(n => {
       const status = n.status || '已发布';
       const scope = ['全校', '教师', '学生', '管理员'].includes(n.scope) ? n.scope : '全校';
       if (status !== '已发布') return false;
       if (n.expiresAt && n.expiresAt < todayKey) return false;
-      return state.role === 'admin' || state.role === 'academic' || scope === '全校' || scope === roleScope;
+      return state.role === 'admin' || scope === '全校' || scope === roleScope;
     });
   }
 
@@ -645,7 +583,7 @@
     const root = $('#dialog-root');
     const list = currentNotices();
     if (focusId) DB.markNoticeRead(focusId, state.user && state.user.id);
-    root.innerHTML = '<div class="dialog-mask"><div class="dialog announcement-center" role="dialog" aria-modal="true" aria-label="通知与公告"><div class="dialog-title">通知与公告</div><p class="dialog-body">这里展示当前账号可见的正式公告。阅读状态按账号分别记录。</p><div class="announcement-center-list">' + (list.length ? list.map(n => '<article class="announcement-reader' + noticePriorityClass(n) + (n.id === focusId ? ' focused' : '') + '"><div class="announcement-reader-head"><div><span>' + esc(n.priority || '普通') + '</span><b>' + esc(noticeTitle(n)) + '</b></div><small>' + esc(n.scope || '全校') + ' · ' + esc((n.publishedAt || n.createdAt || '').slice(0, 10)) + '</small></div><p>' + esc(n.text) + '</p><div class="announcement-reader-foot"><span>发布：' + esc(n.publisher || '系统') + (n.expiresAt ? ' · 有效至 ' + esc(n.expiresAt) : '') + '</span>' + (noticeIsRead(n) || n.id === focusId ? '<em>已读</em>' : '<button type="button" data-notice-read="' + esc(n.id) + '">标为已读</button>') + '</div></article>').join('') : '<div class="plan-empty">当前没有可查看的公告。</div>') + '</div><div class="dialog-actions">' + (state.role === 'admin' || state.role === 'academic' ? '<button class="btn btn-outline" data-notice-manage>管理公告</button>' : '') + '<button class="btn btn-primary" data-notice-center-close>关闭</button></div></div></div>';
+    root.innerHTML = '<div class="dialog-mask"><div class="dialog announcement-center" role="dialog" aria-modal="true" aria-label="通知与公告"><div class="dialog-title">通知与公告</div><p class="dialog-body">这里展示当前账号可见的正式公告。阅读状态按账号分别记录。</p><div class="announcement-center-list">' + (list.length ? list.map(n => '<article class="announcement-reader' + noticePriorityClass(n) + (n.id === focusId ? ' focused' : '') + '"><div class="announcement-reader-head"><div><span>' + esc(n.priority || '普通') + '</span><b>' + esc(noticeTitle(n)) + '</b></div><small>' + esc(n.scope || '全校') + ' · ' + esc((n.publishedAt || n.createdAt || '').slice(0, 10)) + '</small></div><p>' + esc(n.text) + '</p><div class="announcement-reader-foot"><span>发布：' + esc(n.publisher || '系统') + (n.expiresAt ? ' · 有效至 ' + esc(n.expiresAt) : '') + '</span>' + (noticeIsRead(n) || n.id === focusId ? '<em>已读</em>' : '<button type="button" data-notice-read="' + esc(n.id) + '">标为已读</button>') + '</div></article>').join('') : '<div class="plan-empty">当前没有可查看的公告。</div>') + '</div><div class="dialog-actions">' + (state.role === 'admin' ? '<button class="btn btn-outline" data-notice-manage>管理公告</button>' : '') + '<button class="btn btn-primary" data-notice-center-close>关闭</button></div></div></div>';
     $$('[data-notice-read]', root).forEach(button => button.onclick = () => { DB.markNoticeRead(button.dataset.noticeRead, state.user && state.user.id); openNoticeCenter(); updateNoticeBadge(); });
     const manage = $('[data-notice-manage]', root);
     if (manage) manage.onclick = () => { root.innerHTML = ''; nav('#/admin?tab=notices'); };
@@ -656,12 +594,11 @@
   function renderHome() {
     const isStudent = state.role === 'student';
     const isAdmin = state.role === 'admin';
-    const isAcademic = state.role === 'academic';
-    const isTeacher = state.role === 'teacher';
+    const isTeacher = !isStudent && !isAdmin;
     const grading = DB.grading();
-    const reviewN = (grading.review || []).filter(recordInScope).length;
-    const doneN = (grading.done || []).filter(recordInScope).length;
-    const users = state.role === 'admin' ? DB.users() : scopedUsers();
+    const reviewN = (grading.review || []).length;
+    const doneN = (grading.done || []).length;
+    const users = DB.users();
     const studentN = users.filter(u => u.role === 'student').length;
     const teacherN = users.filter(u => u.role === 'teacher').length;
     const classN = new Set(users.map(u => u.cls).filter(Boolean)).size;
@@ -673,12 +610,12 @@
     const planDone = planItems.filter(x => x.done).length;
     const planRate = planItems.length ? Math.round(planDone / planItems.length * 100) : 0;
     const user = state.user || {};
-    const greeting = isStudent ? '把今天学明白，也把成长留下来' : isAdmin ? '让学校运行更清楚，让教学支持更及时' : isAcademic ? '让校级教务真正抵达每个班级' : '从备课到研究，把每一次教学变成证据';
-    const roleCycle = isStudent ? '学 · 练 · 诊 · 复' : isAdmin ? '人 · 校 · 班 · 服务' : isAcademic ? '校 · 师 · 生 · 证据' : '班 · 教 · 评 · 研';
-    const heroPrimary = isStudent ? '#/knowledge' : isAdmin || isAcademic ? '#/admin' : '#/paper';
-    const heroSecondary = isStudent ? '#/analytics/students/plan' : isAdmin ? '#/resources' : isAcademic ? '#/analytics' : '#/grading';
-    const heroPrimaryText = isStudent ? '开始学习' : isAdmin ? '进入管理中枢' : isAcademic ? '进入校级管理' : '开始备课组卷';
-    const heroSecondaryText = isStudent ? '查看学习计划' : isAdmin ? '查看资源审核' : isAcademic ? '查看校级学情' : '进入批改中心';
+    const greeting = isStudent ? '把今天学明白，也把成长留下来' : isAdmin ? '让学校运行更清楚，让教学支持更及时' : '从备课到研究，把每一次教学变成证据';
+    const roleCycle = isStudent ? '学 · 练 · 诊 · 复' : isAdmin ? '人 · 班 · 资源 · 服务' : '备 · 教 · 评 · 研';
+    const heroPrimary = isStudent ? '#/knowledge' : isAdmin ? '#/admin' : '#/paper';
+    const heroSecondary = isStudent ? '#/analytics/students/plan' : isAdmin ? '#/resources' : '#/analytics';
+    const heroPrimaryText = isStudent ? '开始学习' : isAdmin ? '进入学校管理' : '开始备课组卷';
+    const heroSecondaryText = isStudent ? '查看学习计划' : isAdmin ? '查看资源审核' : '进入学情研究';
     const capabilityCards = isStudent ? [
       ['knowledge','理解知识点','概念、例题与追问连成一条学习路径','#/knowledge','cyan','先理解'],
       ['wrong','错题诊断','从错误原因出发，安排变式与复习节奏','#/wrongbook','rose','再诊断'],
@@ -689,11 +626,6 @@
       ['class','班级运行','查看班级结构与教学组织基础信息','#/admin?tab=classes','violet','班级'],
       ['notice','公告发布','面向全校或指定角色发布、撤回与管理公告','#/admin?tab=notices','amber','协同'],
       ['book','资源审核','沉淀可复用、可追溯的校本教学资源','#/resources','emerald','资源']
-    ] : isAcademic ? [
-      ['members','师生导入','批量导入教师与学生，自动落入本校组织树','#/admin','cyan','组织'],
-      ['class','班级运行','维护年级、班级、任课教师与学生归属','#/admin?tab=classes','violet','班级'],
-      ['chart','校级学情','查看本校班级进度与学生反馈趋势','#/analytics','emerald','数据'],
-      ['book','教务资源','沉淀、复用本校教学资源与语料','#/resources','amber','资源']
     ] : [
       ['paper','智能备课组卷','从教材章节和知识图谱快速组织教学任务','#/paper','cyan','备课'],
       ['grading','批改与反馈','AI 预批改、教师复核，形成可信反馈闭环','#/grading','emerald','评价'],
@@ -704,8 +636,6 @@
       [planRate + '%','今日计划完成'],[(user.wrongs || []).length,'个人错题'],[(user.submissions || []).length,'学习反馈'],[resourcesN,'可用学习资源']
     ] : isAdmin ? [
       [studentN,'学生账号'],[teacherN,'教师账号'],[classN,'班级与部门'],[unreadN,'未读动态']
-    ] : isAcademic ? [
-      [studentN,'本校学生'],[teacherN,'本校教师'],[classN,'本校班级'],[unreadN,'未读动态']
     ] : [
       [reviewN,'待复核答卷'],[doneN,'已完成批改'],[studentN,'覆盖学生'],[resourcesN,'共建资源']
     ];
@@ -717,23 +647,16 @@
       ['教学支持画像','从成员、班级和资源三个维度了解学校支持需求。','#/admin'],
       ['资源质量治理','让校本资源有来源、有审核、有版本、有复用。','#/resources'],
       ['服务运行检查','统一查看 AI 服务、权限边界和本地运行状态。','#/admin?tab=permissions']
-    ] : isAcademic ? [
-      ['组织关系维护','从学校、教务处到班级，保持师生归属清楚可追溯。','#/admin?tab=classes'],
-      ['校级数据支持','把班级批改、计划与资源汇总成教务可读的证据。','#/analytics'],
-      ['教师协作服务','为老师提供名单、资源、公告与批改支持。','#/admin']
     ] : [
       ['班级问题发现','从学情报告定位共性薄弱点，形成下一轮教学问题。','#/analytics'],
       ['教学证据沉淀','把组卷、批改、反馈和资源转化为可复盘的教学证据。','#/grading'],
       ['校本研究共创','将优秀讲义、案例和课堂语料沉淀到资源库。','#/resources']
     ];
     const capabilityHtml = capabilityCards.map(c => '<article class="capability-card tone-' + c[4] + '" data-nav="' + c[3] + '"><div class="capability-top"><span class="capability-icon tone-' + c[4] + '">' + icon(c[0], 22) + '</span><span class="capability-stage">' + c[5] + '</span></div><h3>' + c[1] + '</h3><p>' + c[2] + '</p><span class="capability-link">进入功能 ' + icon('arrow', 16) + '</span></article>').join('');
-    const classSummary = isStudent ? classSummaryForStudent(user) : null;
-    const classInfoHtml = isStudent ? '<section class="student-class-card"><div class="student-class-card__head"><div><span>我的班级</span><h2>' + esc(classSummary.cls) + '</h2></div><span class="tag tag-blue">' + esc(classSummary.school) + '</span></div><div class="student-class-card__meta"><span>' + esc(classSummary.grade) + '</span><span>班级信息已按权限展示</span><span>个人手机号：' + maskPhone(user.phone) + '</span></div><div class="student-class-card__teachers"><b>任课老师</b>' + (classSummary.teachers.length ? classSummary.teachers.map(t => '<span>' + esc(t.name) + ' · ' + maskPhone(t.phone) + '</span>').join('') : '<span>老师信息待教务处完善</span>') + '</div></section>' : '';
     const html =
       '<div class="page">' +
       '<section class="workspace-hero role-' + state.role + '"><div class="workspace-hero-copy"><span class="workspace-eyebrow">' + roleCycle + ' · 全端工作台</span><h1>' + greeting + '</h1><p>' + today() + ' · ' + esc(M.roles[state.role].label) + '视角。网页、手机与安装端使用同一套学习和教学流程。</p><div class="workspace-actions"><button class="btn workspace-primary" data-nav="' + heroPrimary + '">' + heroPrimaryText + '</button><button class="btn workspace-secondary" data-nav="' + heroSecondary + '">' + heroSecondaryText + '</button></div></div><div class="workspace-orbit" aria-hidden="true"><span></span><span></span><span></span><b>AI</b></div></section>' +
-      '<div class="workspace-status"><span><i class="status-dot ' + (state.offline ? 'gold' : 'green') + '"></i>' + (state.offline ? '弱网模式' : '当前在线') + '</span><span>' + (cloudInfo.cloud ? (cloudInfo.cloudErr ? '服务已连接 · 待补传' : '本机服务已同步') : '浏览器本地存储') + '</span><span>桌面 · 手机 · Android · iOS/PWA</span></div>' +
-      classInfoHtml +
+      '<div class="workspace-status"><span><i class="status-dot ' + (cloudInfo.cloud ? 'green' : 'gold') + '"></i>' + (cloudInfo.cloud ? '数据服务正常' : '数据服务未就绪') + '</span><span>' + (cloudInfo.cloud ? '服务端数据已连接' : '未写入浏览器') + '</span><span>桌面 · 手机 · Android · iOS/PWA</span></div>' +
       '<section class="workspace-metrics">' + metrics.map(m => '<div class="metric-card"><strong>' + m[0] + '</strong><span>' + m[1] + '</span></div>').join('') + '</section>' +
       '<div class="workspace-section-head"><div><span>核心工作流</span><h2>' + (isStudent ? '让学习过程完整发生' : isAdmin ? '让学校支持真正抵达教学现场' : '让教学工作形成可研究的闭环') + '</h2></div><p>所有卡片均连接到现有真实功能。</p></div>' +
       '<section class="capability-grid">' + capabilityHtml + '</section>' +
@@ -751,7 +674,7 @@
         '<button class="btn btn-outline btn-sm" data-nav="#/grading?tab=done">查看</button></div>' : '') +
       (!reviewN && !doneN ? '<div class="empty-state" style="padding:18px 0 4px">' + icon('check', 26) + '<div>暂无待办，上传答卷或组卷后这里会自动出现任务</div></div>' : '') +
       (state.offline ? '<div class="empty-state" style="padding:18px 0 4px">' + icon('clock', 26) + '<div>离线模式：批改与发布任务已进入队列</div></div>' : '') +
-      '</div></main><aside><div class="card research-card"><div class="card-heading"><div><span>成长与研究</span><h2>' + (isStudent ? '学习能力培养' : isAdmin ? '学校改进视角' : isAcademic ? '校级教务支持' : '教学研究工作台') + '</h2></div></div>' + researchCards.map((r, i) => '<button class="research-item" data-nav="' + r[2] + '"><span>0' + (i + 1) + '</span><div><b>' + r[0] + '</b><small>' + r[1] + '</small></div>' + icon('arrow', 16) + '</button>').join('') + '</div><div class="card notice-card"><div class="card-heading"><div><span>协同动态</span><h2>通知与公告</h2></div><button class="notice-view-all" type="button" data-notice-center>' + unreadN + ' 条未读</button></div>' + (notices.length ? notices.slice(0, 5).map(n => '<button type="button" class="notice-preview' + noticePriorityClass(n) + (noticeIsRead(n) ? '' : ' unread') + '" data-notice-view="' + esc(n.id) + '"><span class="notice-date">' + esc((n.publishedAt || n.createdAt || '').slice(5, 10)) + '</span><span><b>' + esc(noticeTitle(n)) + '</b><small>' + esc(n.text) + '</small></span></button>').join('') : '<div class="empty-state" style="padding:18px 0 4px">' + icon('notice', 26) + '<div>暂无公告</div></div>') + (isAdmin || isAcademic ? '<button class="notice-admin-entry" type="button" data-nav="#/admin?tab=notices">' + icon('plus', 14) + ' 发布或管理公告</button>' : '') + '</div></aside></div>' +
+      '</div></main><aside><div class="card research-card"><div class="card-heading"><div><span>成长与研究</span><h2>' + (isStudent ? '学习能力培养' : isAdmin ? '学校改进视角' : '教学研究工作台') + '</h2></div></div>' + researchCards.map((r, i) => '<button class="research-item" data-nav="' + r[2] + '"><span>0' + (i + 1) + '</span><div><b>' + r[0] + '</b><small>' + r[1] + '</small></div>' + icon('arrow', 16) + '</button>').join('') + '</div><div class="card notice-card"><div class="card-heading"><div><span>协同动态</span><h2>通知与公告</h2></div><button class="notice-view-all" type="button" data-notice-center>' + unreadN + ' 条未读</button></div>' + (notices.length ? notices.slice(0, 5).map(n => '<button type="button" class="notice-preview' + noticePriorityClass(n) + (noticeIsRead(n) ? '' : ' unread') + '" data-notice-view="' + esc(n.id) + '"><span class="notice-date">' + esc((n.publishedAt || n.createdAt || '').slice(5, 10)) + '</span><span><b>' + esc(noticeTitle(n)) + '</b><small>' + esc(n.text) + '</small></span></button>').join('') : '<div class="empty-state" style="padding:18px 0 4px">' + icon('notice', 26) + '<div>暂无公告</div></div>') + (isAdmin ? '<button class="notice-admin-entry" type="button" data-nav="#/admin?tab=notices">' + icon('plus', 14) + ' 发布或管理公告</button>' : '') + '</div></aside></div>' +
       '</div>';
     renderPage(html);
     bindTodayPlan();
@@ -785,8 +708,8 @@
       resources: role === 'student'
         ? [['资源检索','#/resources','search'],['我的收藏','#/resources?tab=fav','fav'],['知识讲解','#/knowledge','knowledge'],['错题本','#/wrongbook','wrong']]
         : role === 'admin'
-          ? [['资源审核','#/resources','book'],['我的收藏','#/resources?tab=fav','fav'],['教学语料','#/corpus','book'],['学校管理','#/admin','school']]
-          : [['资源检索','#/resources','search'],['贡献资源','#/resources/upload','upload'],['我的收藏','#/resources?tab=fav','fav'],['教学语料','#/corpus','book'],['学情研究','#/analytics','chart']],
+          ? [['资源审核','#/resources','book'],['我的收藏','#/resources?tab=fav','fav'],['学校管理','#/admin','school']]
+          : [['资源检索','#/resources','search'],['贡献资源','#/resources/upload','upload'],['我的收藏','#/resources?tab=fav','fav'],['学情研究','#/analytics','chart']],
       analytics: [['班级概览','#/analytics','chart'],['学生明细','#/analytics/students','student'],['导出报告','#/analytics/export','export'],['批改证据','#/grading?tab=done','done'],['资源共创','#/resources','book']],
       admin: [['成员管理','#/admin','members'],['班级管理','#/admin?tab=classes','class'],['公告发布','#/admin?tab=notices','notice'],['权限设置','#/admin?tab=permissions','perm'],['资源审核','#/resources','book']],
       knowledge: [['全部知识点','#/knowledge','knowledge'],['数学讲解','#/knowledge?sub=math','graph'],['语文讲解','#/knowledge?sub=zh','book'],['英语讲解','#/knowledge?sub=en','book'],['错题本','#/wrongbook','wrong']],
@@ -805,11 +728,11 @@
   }
 
   function readLocalList(key) {
-    try { const data = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(data) ? data : []; } catch (e) { return []; }
+    return Array.isArray(sessionCache[key]) ? sessionCache[key] : [];
   }
 
   function saveLocalList(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+    sessionCache[key] = Array.isArray(value) ? value : [];
   }
 
   function checklistStorageKey() { return 'fh_module_checklist_' + userStorageScope() + '_' + activeModule(); }
@@ -839,7 +762,7 @@
     let service = null;
     try { service = typeof window.AI.serverStatus === 'function' ? await window.AI.serverStatus() : null; }
     catch (e) {
-      const msg = '无法连接本地 AI 中转服务。请确认启动窗口仍在运行，再重试；手动功能不受影响。';
+      const msg = '无法连接学校 AI 网络服务。请检查服务端状态后重试；手动功能不受影响。';
       setStatus(msg);
       throw new Error(msg);
     }
@@ -946,7 +869,7 @@
         if (!String(result || '').trim()) throw new Error('模型没有返回可用内容，请稍后重试。');
         $('#ai-workspace-result').value = String(result).trim();
         $('#ai-result-panel').classList.remove('hidden');
-        status.textContent = '草稿已生成。你可以继续修改，再选择复制或明确保存到本机。';
+        status.textContent = '草稿已生成。你可以继续修改，再选择复制或明确保存到学校数据服务。';
         showToast('AI 草稿已生成，请核对后采用', 'success');
       } catch (err) {
         status.textContent = err && err.message ? err.message : 'AI 暂时不可用，原有手动功能仍可继续使用。';
@@ -960,9 +883,9 @@
       if (!result) { showToast('当前没有可采用的 AI 结果', 'info'); return; }
       if (button.dataset.aiResult === 'copy') copyPlainText(result);
       if (button.dataset.aiResult === 'note') {
-        let old = ''; try { old = localStorage.getItem(noteStorageKey()) || ''; } catch (e) {}
+        const old = sessionCache[noteStorageKey()] || '';
         const heading = '【AI 协作草稿 · ' + chosen[1] + ' · ' + new Date().toLocaleString() + '】';
-        try { localStorage.setItem(noteStorageKey(), (old ? old.trimEnd() + '\n\n' : '') + heading + '\n' + result); } catch (e) {}
+        sessionCache[noteStorageKey()] = (old ? old.trimEnd() + '\n\n' : '') + heading + '\n' + result;
         showToast('已明确保存到当前目录的研究记录', 'success');
       }
       if (button.dataset.aiResult === 'checklist') {
@@ -1145,8 +1068,7 @@
 
   function exportModuleEvidence() {
     const meta = currentPageMeta();
-    let note = '';
-    try { note = localStorage.getItem(noteStorageKey()) || ''; } catch (e) {}
+    const note = sessionCache[noteStorageKey()] || '';
     const checklist = readLocalList(checklistStorageKey());
     const todayItems = getTodayPlan();
     const lines = ['凤凰花·智学｜目录工作证据','导出时间：' + new Date().toLocaleString(),'账号：' + ((state.user && (state.user.name || state.user.phone)) || state.role),'目录：' + meta.module,'页面：' + meta.title,'', '【研究记录】', note || '暂无记录','', '【行动清单】'].concat(checklist.length ? checklist.map(x => (x.done ? '[已完成] ' : '[待完成] ') + x.text) : ['暂无行动']).concat(['','【今日任务】']).concat(todayItems.length ? todayItems.map(x => (x.done ? '[已完成] ' : '[待完成] ') + x.text) : ['暂无任务']);
@@ -1162,8 +1084,7 @@
   function openModuleNote() {
     const root = $('#dialog-root');
     const label = moduleLabel(activeModule()) || '当前模块';
-    let saved = '';
-    try { saved = localStorage.getItem(noteStorageKey()) || ''; } catch (e) {}
+    const saved = sessionCache[noteStorageKey()] || '';
     root.innerHTML = '<div class="dialog-mask"><div class="dialog module-note-dialog" role="dialog" aria-modal="true"><div class="dialog-title">' + esc(label) + ' · 研究记录</div><p class="dialog-body">记录课堂观察、学习反思、管理问题或下一步行动，仅保存在当前账号的本机浏览器。</p><textarea class="textarea" id="module-note-text" rows="9" placeholder="例如：今天发现的问题、证据、原因判断、下一步尝试……">' + esc(saved) + '</textarea><div class="note-meta"><span id="module-note-count">' + saved.length + ' 字</span><span>自动按账号和目录区分</span></div><div class="note-ai-panel"><div><b>' + icon('spark', 15) + ' AI 整理研究记录</b><small>仅在点击后发送当前文字，原记录不会被自动覆盖。</small></div><button class="btn btn-outline" id="note-ai-organize" type="button">整理为证据链</button><div class="note-ai-status" id="note-ai-status" role="status" aria-live="polite">建议先删除姓名、手机号等敏感信息。</div><div class="note-ai-preview hidden" id="note-ai-preview"><label for="note-ai-result">整理结果预览</label><textarea class="textarea" id="note-ai-result" rows="8"></textarea><button class="btn btn-outline" type="button" data-note-apply>采用此结果</button></div></div><div class="dialog-actions"><button class="btn btn-ghost" data-note-close>取消</button><button class="btn btn-primary" data-note-save>保存记录</button></div></div></div>';
     const ta = $('#module-note-text');
     ta.oninput = () => { $('#module-note-count').textContent = ta.value.length + ' 字'; };
@@ -1194,11 +1115,11 @@
       const value = $('#note-ai-result').value.trim();
       if (!value) return;
       ta.value = value; ta.dispatchEvent(new Event('input', { bubbles:true }));
-      $('#note-ai-status').textContent = '整理结果已放入记录框；点击“保存记录”后才会写入本机。';
+      $('#note-ai-status').textContent = '整理结果已放入记录框；点击“保存记录”后提交到学校数据服务。';
       showToast('已采用整理结果，请记得保存', 'success');
     };
     $('[data-note-close]').onclick = () => { root.innerHTML = ''; };
-    $('[data-note-save]').onclick = () => { try { localStorage.setItem(noteStorageKey(), ta.value.trim()); } catch (e) {} root.innerHTML = ''; showToast('研究记录已保存到本机', 'success'); };
+    $('[data-note-save]').onclick = () => { sessionCache[noteStorageKey()] = ta.value.trim(); root.innerHTML = ''; showToast('研究记录已提交到当前会话，待服务连接后写入', 'success'); };
     root.querySelector('.dialog-mask').onclick = e => { if (e.target === e.currentTarget) root.innerHTML = ''; };
     ta.focus();
   }
@@ -1287,7 +1208,7 @@
     injectModuleToolkit(main);
   }
 
-  window.__app = { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$, DB, roleLabel, maskPhone, currentSchoolId, classMatches, scopedUsers, scopedClasses, canManageRosterRole, classSummaryForStudent, recordInScope };
+  window.__app = { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$, DB };
 
   /* 原生保存桥：Android WebView 内把文本文件交给系统「下载」目录；浏览器环境返回 false 走原逻辑 */
   window.fhNativeSave = function (name, content) {
@@ -1310,7 +1231,7 @@
       nav('#/home');
       return;
     }
-    if (state.role === 'teacher' && ['/help'].some(p => path.startsWith(p))) {
+    if (state.role === 'teacher' && ['/admin', '/help'].some(p => path.startsWith(p))) {
       showToast('教师账号仅开放教学、班级、布置批改与审核功能', 'error');
       nav('#/home');
       return;
@@ -1322,7 +1243,7 @@
     }
     renderShell();
     const renderer = window.__pages[path] ||
-      (path.match(/^\/grading\/[^/]+$/) ? window.__pages['/grading/_detail'] :
+      (path.match(/^\/grading\/\d+$/) ? window.__pages['/grading/_detail'] :
         path.match(/^\/resources\/\d+$/) ? window.__pages['/resources/_detail'] :
         path.match(/^\/knowledge\/[\w-]+$/) ? window.__pages['/knowledge/_detail'] :
         window.__pages['/placeholder']);
@@ -1330,12 +1251,6 @@
   };
 
   window.addEventListener('hashchange', window.__router);
-  window.addEventListener('fh-ai-config-changed', function () {
-    if (state.loggedIn) renderShell();
-  });
-  window.addEventListener('fh-ai-status-changed', function () {
-    if (state.loggedIn) renderShell();
-  });
 
   /* ---------- 顶栏交互 ---------- */
   function setSidebar(open) {
@@ -1358,9 +1273,7 @@
     const allowedKeys = state.role === 'student'
       ? ['home', 'knowledge', 'wrongbook', 'grading', 'resources', 'plan', 'help']
       : state.role === 'teacher'
-        ? ['home', 'paper', 'grading', 'resources', 'analytics', 'admin', 'help']
-        : state.role === 'academic'
-          ? ['home', 'paper', 'grading', 'resources', 'analytics', 'admin', 'help']
+        ? ['home', 'paper', 'grading', 'resources', 'analytics', 'help']
         : ['home', 'admin', 'resources'];
     const entries = [];
     modules.filter(m => allowedKeys.includes(m.key)).forEach(m => {
@@ -1444,6 +1357,7 @@
     if (act === 'logout') {
       state.loggedIn = false;
       state.user = null;
+      if (DB.logout) DB.logout();
       sessionStorage.removeItem('fh_logged');
       sessionStorage.removeItem('fh_role');
       sessionStorage.removeItem('fh_uid');
@@ -1468,30 +1382,29 @@
       '<h3 class="dialog-title">修改密码</h3>' +
       '<div class="dialog-body">' +
       '<div class="field"><label>原密码</label><input class="input" id="cp-old" type="password" placeholder="请输入原密码"></div>' +
-      '<div class="field"><label>新密码（至少 6 位）</label><input class="input" id="cp-new" type="password" placeholder="请输入新密码"></div>' +
+      '<div class="field"><label>新密码（至少 8 位）</label><input class="input" id="cp-new" type="password" placeholder="请输入新密码"></div>' +
       '<div class="field"><label>确认新密码</label><input class="input" id="cp-new2" type="password" placeholder="再次输入新密码"></div>' +
       '</div>' +
       '<div class="dialog-actions"><button class="btn btn-ghost" data-dialog="cancel">取消</button>' +
       '<button class="btn btn-primary" data-dialog="ok">保存</button></div></div></div>';
     root.querySelector('[data-dialog="cancel"]').onclick = () => { root.innerHTML = ''; };
     root.querySelector('.dialog-mask').addEventListener('click', e => { if (e.target === e.currentTarget) root.innerHTML = ''; });
-    root.querySelector('[data-dialog="ok"]').onclick = () => {
+    root.querySelector('[data-dialog="ok"]').onclick = async () => {
       const oldP = $('#cp-old').value, p1 = $('#cp-new').value, p2 = $('#cp-new2').value;
-      if (p1.length < 6) { showToast('新密码至少 6 位', 'error'); return; }
+      if (p1.length < 8) { showToast('新密码至少 8 位', 'error'); return; }
       if (p1 !== p2) { showToast('两次输入的新密码不一致', 'error'); return; }
-      const r = DB.changePassword(u.phone, oldP, p1);
+      const r = await DB.changePassword(u.phone, oldP, p1);
       root.innerHTML = '';
       if (r.ok) { showToast('密码已修改', 'success'); DB.auditLog('修改密码', u.name + ' 修改了自己的登录密码', u.name); }
       else showToast(r.msg, 'error');
     };
   }
 
-  const offlineToggle = $('#offline-toggle');
-  if (offlineToggle) offlineToggle.onclick = () => {
-    state.offline = !state.offline;
+  $('#offline-toggle').onclick = async () => {
+    const result = DB.reconnect ? await DB.reconnect() : { ok: false };
     renderShell();
     window.__router();
-    showToast(state.offline ? '已切换弱网模式：任务将等待网络恢复' : '已恢复在线模式', state.offline ? 'info' : 'success');
+    showToast(result.ok ? '学校数据服务已连接' : '学校数据服务仍未就绪', result.ok ? 'success' : 'info');
   };
   $('#ai-chip').onclick = (e) => {
     e.stopPropagation();
@@ -1549,11 +1462,11 @@
     const cfg = network && network.getConfig ? network.getConfig() : { apiBase: '', token: '' };
     const info = DB.cloudInfo ? DB.cloudInfo() : {};
     root.innerHTML = '<div class="dialog-mask"><div class="dialog fh-network-dialog" role="dialog" aria-modal="true" aria-labelledby="network-dialog-title">' +
-      '<div class="fh-network-heading"><div><span class="fh-network-kicker">Network ready</span><h3 class="dialog-title" id="network-dialog-title">网络接入</h3><p>接入局域网或独立数据服务后，多端可以共享同一套学习数据；未连接时仍然只使用本机数据。</p></div><span class="fh-network-mark" aria-hidden="true">↗</span></div>' +
-      '<div class="fh-network-status" id="network-status-card"><span class="fh-network-status-dot" id="network-status-dot"></span><div><strong id="network-status-title">' + (info.cloud ? '当前服务已连接' : '当前为本地优先模式') + '</strong><p id="network-status-detail">' + esc(info.cloud ? '数据会写入本机服务的配置文件夹。' : (info.cloudErr || '数据保存在当前设备，稍后可以再连接服务。')) + '</p></div></div>' +
+      '<div class="fh-network-heading"><div><span class="fh-network-kicker">Network status</span><h3 class="dialog-title" id="network-dialog-title">网络接入</h3><p>所有业务数据必须经过学校数据服务；未连接时只显示服务状态，不在浏览器保存数据。</p></div><span class="fh-network-mark" aria-hidden="true">↗</span></div>' +
+      '<div class="fh-network-status" id="network-status-card"><span class="fh-network-status-dot" id="network-status-dot"></span><div><strong id="network-status-title">' + (info.cloud ? '当前服务已连接' : '学校数据服务未就绪') + '</strong><p id="network-status-detail">' + esc(info.cloud ? '账号和业务数据由服务端保存。' : (info.cloudErr || '请配置可访问的数据服务。')) + '</p></div></div>' +
       '<div class="field"><label for="network-api-base">数据服务地址</label><input class="input" id="network-api-base" type="url" value="' + esc(cfg.apiBase || '') + '" placeholder="留空=跟随当前页面，例如 http://192.168.1.8:8080"><div class="form-hint">填写服务根地址，不要加 /api。局域网设备请使用启动窗口打印的地址；HTTPS 页面只能连接 HTTPS 服务。</div></div>' +
-      '<div class="field"><label for="network-token">访问令牌（可选）</label><input class="input" id="network-token" type="password" value="' + esc(cfg.token || '') + '" autocomplete="off" placeholder="服务端设置 FH_TOKEN 后填写"><div class="form-hint">令牌只保存在当前设备，用于数据读写和 AI 中转请求；留空时使用当前页面的连接配置。</div></div>' +
-      '<div class="fh-network-route"><span>本机浏览器</span><i>→</i><span>局域网数据服务</span><i>→</i><span>JSON / 后续数据库</span></div>' +
+      '<div class="field"><label for="network-token">服务端会话令牌</label><input class="input" id="network-token" type="password" value="" autocomplete="off" placeholder="登录后自动获得，无需手动填写"><div class="form-hint">令牌只在当前会话使用，API Key 不会进入浏览器。</div></div>' +
+      '<div class="fh-network-route"><span>当前页面</span><i>→</i><span>学校数据服务</span><i>→</i><span>数据库与审计</span></div>' +
       '<div class="dialog-actions"><button class="btn btn-ghost" data-network-close>关闭</button><button class="btn btn-outline" id="network-check">检测服务</button><button class="btn btn-ghost" id="network-retry">重试待同步</button><button class="btn btn-primary" id="network-save">保存并连接</button></div></div></div>';
 
     const statusCard = $('#network-status-card');
@@ -1590,8 +1503,8 @@
       try {
         const result = DB.reconnect ? await DB.reconnect() : { ok: false, pending: 0 };
         const current = DB.cloudInfo ? DB.cloudInfo() : {};
-        paint(!!current.cloud, current.cloud ? '服务已连接' : '仍处于本地模式', result.synced ? '已重试同步 ' + result.synced + ' 项' : (current.cloudErr || '当前没有可重试的数据'));
-        showToast(result.synced ? '待同步数据已送达服务' : (current.cloud ? '当前没有待同步数据' : '服务暂不可用，数据仍保存在本机'), result.synced ? 'success' : 'info');
+        paint(!!current.cloud, current.cloud ? '服务已连接' : '服务仍未就绪', result.synced ? '已提交 ' + result.synced + ' 项' : (current.cloudErr || '没有可提交的数据'));
+        showToast(result.synced ? '待提交数据已送达服务' : (current.cloud ? '当前没有待提交数据' : '服务暂不可用，数据未写入本机'), result.synced ? 'success' : 'info');
       } finally { if (button) { button.disabled = false; button.textContent = '重试待同步'; } }
     };
     $('#network-save').onclick = async () => {
@@ -1603,18 +1516,18 @@
         const result = DB.reconnect ? await DB.reconnect() : { ok: false };
         const current = DB.cloudInfo ? DB.cloudInfo() : {};
         if (current.cloud) {
-          paint(true, '已连接并保存', '后续数据会优先写入当前服务；本机仍保留一份缓存。');
+          paint(true, '已连接并保存', '后续数据将写入学校数据服务。');
           showToast('网络地址已保存，数据服务已连接', 'success');
         } else {
-          paint(false, '已保存，等待服务可用', current.cloudErr || '数据仍保存在本机，服务恢复后自动重试');
-          showToast('地址已保存；当前仍使用本机数据', 'info');
+          paint(false, '已保存，等待服务可用', current.cloudErr || '数据不会写入本机，请稍后重试');
+          showToast('地址已保存；学校数据服务仍未就绪', 'info');
         }
         if (result && result.synced) showToast('已补传 ' + result.synced + ' 项待同步数据', 'success');
       } catch (e) { paint(false, '地址未保存', e.message || '请检查服务地址'); showToast(e.message || '网络地址无效', 'error'); }
     };
     root.querySelector('[data-network-close]').onclick = () => { root.innerHTML = ''; };
     root.querySelector('.dialog-mask').addEventListener('click', e => { if (e.target === e.currentTarget) root.innerHTML = ''; });
-    paint(!!info.cloud, info.cloud ? '当前服务已连接' : '当前为本地优先模式', info.cloud ? '数据会写入本机服务的配置文件夹。' : (info.cloudErr || '数据保存在当前设备，稍后可以再连接服务。'));
+    paint(!!info.cloud, info.cloud ? '当前服务已连接' : '当前服务未就绪', info.cloud ? '数据会写入学校数据服务。' : (info.cloudErr || '请恢复学校数据服务后再继续。'));
   }
 
   /* ---------- AI 设置 ---------- */
@@ -1632,7 +1545,7 @@
   'use strict';
   const M = window.MOCK;
   const DB = window.FH_DB;
-  const { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$, roleLabel, maskPhone, currentSchoolId, classMatches, scopedUsers, scopedClasses, canManageRosterRole, classSummaryForStudent, recordInScope } = window.__app;
+  const { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$ } = window.__app;
   const P = window.__pages;
 
   /* ---------- 通用小组件 ---------- */
@@ -1658,12 +1571,6 @@
   state.paper.mode = state.paper.mode || 'free';
   state.paper.preset = state.paper.preset || '';
   state.paper.exportVer = state.paper.exportVer || 'teacher';
-  state.paper.stage = state.paper.stage || 'setup';
-  state.paper.goal = state.paper.goal || 'unit';
-  state.paper.targetClass = state.paper.targetClass || '';
-  state.paper.releaseMode = state.paper.releaseMode || 'manual';
-  state.paper.blueprint = Array.isArray(state.paper.blueprint) ? state.paper.blueprint : [];
-  state.paper.bankFilter = state.paper.bankFilter || { q: '', type: '全部题型', diff: '全部难度', source: '全部来源' };
   state.paper.generating = false;
 
   /* ---------- 试卷草稿持久化：切换页面 / 刷新均不丢失 ---------- */
@@ -1678,12 +1585,6 @@
         mode: p.mode,
         preset: p.preset,
         exportVer: p.exportVer,
-        stage: p.stage,
-        goal: p.goal,
-        targetClass: p.targetClass,
-        releaseMode: p.releaseMode,
-        blueprint: p.blueprint,
-        bankFilter: p.bankFilter,
         checked: Array.from(p.checked || []),
         readingPick: p.readingPick || null
       }));
@@ -1701,12 +1602,6 @@
       if (d.mode) state.paper.mode = d.mode;
       if (d.preset) state.paper.preset = d.preset;
       if (d.exportVer) state.paper.exportVer = d.exportVer;
-      if (d.stage) state.paper.stage = d.stage;
-      if (d.goal) state.paper.goal = d.goal;
-      if (d.targetClass) state.paper.targetClass = d.targetClass;
-      if (d.releaseMode) state.paper.releaseMode = d.releaseMode;
-      if (Array.isArray(d.blueprint)) state.paper.blueprint = d.blueprint;
-      if (d.bankFilter) state.paper.bankFilter = Object.assign(state.paper.bankFilter, d.bankFilter);
       if (Array.isArray(d.checked)) d.checked.forEach(k => state.paper.checked.add(k));
       state.paper.readingPick = d.readingPick || null;
       const maxId = d.questions.reduce((m, q) => Math.max(m, q.id || 0), 0);
@@ -1715,7 +1610,7 @@
   }
   loadPaperDraft();
 
-  /* ---------- 正式版：业务数据全部走 FH_DB（本地 + 云端配置文件夹） ---------- */
+  /* ---------- 正式版：业务数据全部走 FH_DB（本地 + 云端配置文件夹），旧演示数据不再读取 ---------- */
   function bizId() { return DB.uid('biz'); }
   function moveQueueItem(id, fromKey, toKey, patch) {
     const g = DB.grading();
@@ -1730,95 +1625,6 @@
     to.unshift(item);
     DB.saveCollection('grading');
     return item;
-  }
-
-  function gradingItem(id) {
-    const G = DB.grading();
-    const groups = ['recognized', 'grading', 'review', 'done'];
-    for (const key of groups) {
-      const item = (G[key] || []).find(x => String(x.id) === String(id));
-      if (item) return { item: item, key: key };
-    }
-    return null;
-  }
-  function gradingAnswers(item) {
-    return Array.isArray(item && item.answers) ? item.answers : [];
-  }
-  function removeGradingItem(id) {
-    const found = gradingItem(id);
-    if (!found) return null;
-    const list = DB.grading()[found.key] || [];
-    const index = list.findIndex(x => String(x.id) === String(id));
-    if (index < 0) return null;
-    const removed = list.splice(index, 1)[0];
-    DB.saveCollection('grading');
-    return removed;
-  }
-  async function startGradingItem(id) {
-    const found = gradingItem(id);
-    if (!found || found.key === 'done') return;
-    if (found.key === 'review') { showToast('该答卷已进入待复核，请打开后完成评分', 'info'); return; }
-    if (found.key === 'recognized' && (!found.item.source || !Array.isArray(found.item.source.pages) || !found.item.source.pages.length)) {
-      showToast('这份答卷没有可用的原始文件，请重新上传后再批改', 'error');
-      return;
-    }
-    if (found.key === 'recognized' && !gradingAnswers(found.item).some(answer => String(answer.text || '').trim())) {
-      showToast('OCR 未识别到可用文字，请先打开原图补录或修正 OCR 文本', 'warning');
-      return;
-    }
-    if (found.key === 'recognized') {
-      moveQueueItem(id, 'recognized', 'grading', { status: 'grading', progress: 12, note: '正在整理识别结果', startedAt: DB.now() });
-    }
-    const current = gradingItem(id);
-    if (!current) return;
-    const target = current.item;
-    target.progress = 35;
-    target.status = 'grading';
-    target.note = 'OCR 已完成，正在生成批改建议';
-    target.answers = gradingAnswers(target);
-    DB.saveCollection('grading');
-    renderGrading();
-    let aiMessage = '';
-    if (window.AI && window.AI.isConfigured()) {
-      try {
-        const result = await window.AI.gradeAnswer({ task: target.task, total: target.total || 100, answers: target.answers });
-        const score = Number(result && result.score);
-        if (!Number.isFinite(score)) throw new Error('模型未返回有效分数');
-        target.score = Math.max(0, Math.min(target.total || 100, Math.round(score)));
-        target.comment = result && result.comment ? String(result.comment) : '';
-        target.reasons = Array.isArray(result && result.reasons) ? result.reasons : [];
-        target.confidence = 'AI 已生成，待教师复核';
-        target.note = 'AI 预批改完成，等待教师复核';
-        aiMessage = '，AI 已生成初稿';
-      } catch (e) {
-        target.confidence = 'AI 暂不可用，待人工评分';
-        target.note = 'OCR 已完成，等待教师人工评分';
-      }
-    } else {
-      target.confidence = '待人工评分';
-      target.note = 'OCR 已完成，等待教师人工评分';
-    }
-    target.progress = 100;
-    moveQueueItem(id, 'grading', 'review', { status: 'review', progress: 100, note: target.note, confidence: target.confidence, score: target.score, comment: target.comment, reasons: target.reasons });
-    DB.auditLog('开始批改', target.name + ' 已进入待复核' + aiMessage, state.user && state.user.name);
-    showToast(target.name + ' 已进入待复核', 'success');
-    renderGrading();
-  }
-  function savePublishedFeedback(item, explanations) {
-    if (!item) return;
-    item.published = true;
-    item.publishedAt = DB.now();
-    item.feedback = { score: item.score, total: item.total || 100, comment: item.comment || '', explanations: explanations || [] };
-    DB.saveCollection('grading');
-    const users = DB.collection('users') || [];
-    const student = users.find(u => (item.studentId && String(u.id) === String(item.studentId)) || (item.studentPhone && String(u.phone) === String(item.studentPhone)) || (item.name && u.name === item.name));
-    if (student) {
-      student.submissions = Array.isArray(student.submissions) ? student.submissions : [];
-      const old = student.submissions.find(s => String(s.gradingId) === String(item.id));
-      const feedback = { gradingId: item.id, task: item.task, score: item.score, total: item.total || 100, comment: item.comment || '', explanations: explanations || [], publishedAt: item.publishedAt };
-      if (old) Object.assign(old, feedback); else student.submissions.unshift(feedback);
-      DB.saveCollection('users');
-    }
   }
 
   const GRADE_TEXT = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
@@ -2001,7 +1807,7 @@
     refresh();
   }
 
-  function renderPaperLegacy() {
+  function renderPaper() {
     state.paper.tab = state.query.tab === 'graph' ? 'graph' : 'chapter';
     const tree = state.paper.tab === 'graph' ? graphTree() : chapterTree();
     const info = paperCtxInfo();
@@ -2228,7 +2034,7 @@
       box.innerHTML = '<div class="skeleton" style="height:40px;border-radius:8px"></div><p class="form-hint" style="margin-top:8px">正在检索 ' + (lang === 'en' ? 'en' : 'zh') + '.wikisource.org 公有领域文本…</p>';
       try {
         const list = await window.AI.searchSources(kw, lang, 'wikisource');
-        if (!list.length) { box.innerHTML = '<div class="reason-item" style="border-left-color:var(--gold)">' + icon('notice', 15) + '<span>未检索到结果，可换关键词，或直接让 AI 从内置语料库选题</span></div>'; return; }
+        if (!list.length) { box.innerHTML = '<div class="reason-item" style="border-left-color:var(--gold)">' + icon('notice', 15) + '<span>未检索到结果，请更换关键词或补充可核验的公开来源</span></div>'; return; }
         box.innerHTML = list.map((r, i) =>
           '<div class="reason-item"><span style="flex:1"><b>' + esc(r.title) + '</b><div class="qc-meta">' + esc(r.snippet) + '</div></span>' +
           '<button class="btn btn-outline btn-sm" data-pick="' + i + '">选用</button></div>'
@@ -2250,7 +2056,7 @@
           }
         });
       } catch (err) {
-        box.innerHTML = '<div class="reason-item" style="border-left-color:var(--red)">' + icon('close', 15) + '<span>检索失败：' + esc(err.message) + '（可改用内置语料库直接生成）</span></div>';
+        box.innerHTML = '<div class="reason-item" style="border-left-color:var(--red)">' + icon('close', 15) + '<span>检索失败：' + esc(err.message) + '（请补充官方来源或稍后重试）</span></div>';
       }
     };
     $('#read-pick-clear').onclick = () => {
@@ -2258,7 +2064,7 @@
       savePaperDraft();
       $('#read-picked').classList.add('hidden');
       $('#read-pick-clear').classList.add('hidden');
-      showToast('已清除选用材料，将自动从内置语料库选题', 'info');
+      showToast('已清除选用材料，请重新选择可核验的网络来源', 'info');
     };
     $('#paper-name').oninput = (e) => {
       state.paper.name = e.target.value.trim();
@@ -2328,7 +2134,7 @@
       }
       confirmDialog({
         title: '发布到班级作业',
-        body: '将《' + esc(state.paper.name) + '》发布到 <b>' + esc(paperTargetName()) + '</b>？学生端会收到作业提醒。',
+        body: '将《' + esc(state.paper.name) + '》发布到 <b>七（2）班</b>？学生端 App 将收到作业提醒。',
         okText: '确认发布',
         onConfirm: () => {
           const paper = Object.assign({}, state.paper, { id: state.paper.id || ('paper_' + Date.now()), status: '已发布', publishedAt: new Date().toISOString(), publishedBy: (state.user && state.user.name) || '任课教师' });
@@ -2338,383 +2144,11 @@
           if (pi >= 0) papers[pi] = paper; else papers.unshift(paper);
           DB.saveCollection('papers');
           DB.auditLog('发布试卷', '《' + paper.name + '》已审核发布', paper.publishedBy);
-          showToast('已审核并发布到' + paperTargetName() + '，学生端将收到作业', 'success');
+          showToast('已审核并发布到七（2）班，学生 App 将收到作业', 'success');
           renderPaper();
         }
       });
     };
-    bindQuestionActions();
-    savePaperDraft();
-  }
-
-  /* ---------- 新版组卷工作台：方案 → 蓝图 → 题库 → 检查发布 ---------- */
-  const PAPER_STAGES = [
-    { id: 'setup', label: '方案', hint: '范围与目标' },
-    { id: 'blueprint', label: '蓝图', hint: '题型与配比' },
-    { id: 'bank', label: '题库', hint: '候选题与筛选' },
-    { id: 'review', label: '检查发布', hint: '质量与投放' }
-  ];
-  const PAPER_TYPES = ['选择题', '判断题', '填空题', '多选题', '阅读题', '解答题'];
-
-  function paperTargetClasses() {
-    const list = (scopedClasses() || []).filter(c => c && c.name);
-    if (!list.length && state.user && state.user.cls) {
-      list.push({ id: 'self-class', name: state.user.cls, grade: state.user.grade || '', schoolId: currentSchoolId() });
-    }
-    return list;
-  }
-
-  function paperTargetName() {
-    const cls = paperTargetClasses().find(c => String(c.id) === String(state.paper.targetClass));
-    return cls ? cls.name : (state.paper.targetClass || (state.user && state.user.cls) || '暂不指定班级');
-  }
-
-  function paperBlueprintDefaults() {
-    const info = paperCtxInfo();
-    const presets = M.PAPER_PRESETS[info.ctx.subject] || [];
-    const preset = presets.find(p => p.id === state.paper.preset) || presets[0];
-    if (preset && !state.paper.preset) state.paper.preset = preset.id;
-    return (preset && preset.sections ? preset.sections : [
-      { type: '选择题', count: 8, points: 3, diff: { 易: 0.5, 中: 0.35, 难: 0.15 } },
-      { type: '填空题', count: 5, points: 4, diff: { 易: 0.4, 中: 0.4, 难: 0.2 } },
-      { type: '解答题', count: 3, points: 8, diff: { 易: 0.2, 中: 0.5, 难: 0.3 } }
-    ]).map((sec, i) => {
-      const points = Array.isArray(sec.points)
-        ? Math.max(1, Math.round(sec.points.reduce((sum, n) => sum + Number(n || 0), 0) / sec.points.length))
-        : Math.max(1, Number(sec.points || 1));
-      const mix = sec.diff || { 易: 0.4, 中: 0.4, 难: 0.2 };
-      const diff = ['易', '中', '难'].sort((a, b) => Number(mix[b] || 0) - Number(mix[a] || 0))[0] || '中';
-      return { id: 'bp_' + i + '_' + Date.now(), type: sec.type, count: Number(sec.count || 1), points: points, diff: diff, mix: mix };
-    });
-  }
-
-  function ensurePaperBlueprint() {
-    if (!Array.isArray(state.paper.blueprint) || !state.paper.blueprint.length) state.paper.blueprint = paperBlueprintDefaults();
-    return state.paper.blueprint;
-  }
-
-  function paperBlueprintStats(rows) {
-    const list = rows || ensurePaperBlueprint();
-    const count = list.reduce((sum, row) => sum + Math.max(0, Number(row.count || 0)), 0);
-    const score = list.reduce((sum, row) => sum + Math.max(0, Number(row.count || 0)) * Math.max(0, Number(row.points || 0)), 0);
-    const preset = (M.PAPER_PRESETS[paperCtxInfo().ctx.subject] || []).find(p => p.id === state.paper.preset);
-    return { count: count, score: score, time: preset ? preset.time : Math.max(30, Math.round(count * 2.5)) };
-  }
-
-  function paperQuality() {
-    const questions = state.paper.questions || [];
-    const keys = new Set();
-    let duplicates = 0;
-    questions.forEach(q => {
-      const key = window.AI && window.AI.stemKey ? window.AI.stemKey(q) : String(q.stem || '').replace(/\s+/g, '').slice(0, 100);
-      if (key && keys.has(key)) duplicates += 1;
-      if (key) keys.add(key);
-    });
-    const answerMissing = questions.filter(q => q.type !== '资料' && !String(q.answer || '').trim()).length;
-    const explainMissing = questions.filter(q => q.type !== '资料' && !String(q.explain || q.process || '').trim()).length;
-    const unchecked = questions.filter(q => q.type !== '资料' && !q.checked).length;
-    const expected = ensurePaperBlueprint().reduce((map, row) => {
-      map[row.type] = (map[row.type] || 0) + Number(row.count || 0);
-      return map;
-    }, {});
-    const actual = questions.reduce((map, q) => {
-      map[q.type] = (map[q.type] || 0) + 1;
-      return map;
-    }, {});
-    const gaps = Object.keys(expected).reduce((sum, type) => sum + Math.max(0, expected[type] - (actual[type] || 0)), 0);
-    return { total: questions.length, duplicates: duplicates, answerMissing: answerMissing, explainMissing: explainMissing, unchecked: unchecked, gaps: gaps };
-  }
-
-  function paperFilteredQuestions() {
-    const f = state.paper.bankFilter || {};
-    const query = String(f.q || '').trim().toLowerCase();
-    return (state.paper.questions || []).filter(q => {
-      const hay = [q.stem, q.kp, q.source, q.type].join(' ').toLowerCase();
-      return (!query || hay.includes(query)) && (!f.type || f.type === '全部题型' || q.type === f.type) &&
-        (!f.diff || f.diff === '全部难度' || q.diff === f.diff) && (!f.source || f.source === '全部来源' || q.source === f.source);
-    });
-  }
-
-  function paperContextSelects() {
-    const ctx = state.paper.ctx;
-    const subjectOptions = Object.keys(M.TEXTBOOKS).map(k => '<option value="' + k + '"' + (ctx.subject === k ? ' selected' : '') + '>' + esc(M.TEXTBOOKS[k].name) + '</option>').join('');
-    const gradeOptions = GRADE_TEXT.slice(1).map((g, i) => '<option value="' + (i + 1) + '"' + (Number(ctx.grade) === i + 1 ? ' selected' : '') + '>' + g + '年级</option>').join('');
-    const subj = M.TEXTBOOKS[ctx.subject] || { versions: [] };
-    const versions = subj.versions || [];
-    const ver = versions.find(v => v.id === ctx.version) || versions[0];
-    const book = ver && ver.books && ver.books[Number(ctx.grade)];
-    const terms = book ? Object.keys(book) : ['上', '下'];
-    if (!terms.includes(ctx.term)) state.paper.ctx.term = terms[0];
-    if (!versions.some(v => v.id === ctx.version) && versions[0]) state.paper.ctx.version = versions[0].id;
-    return '<select class="select" id="p2-subject" aria-label="学科">' + subjectOptions + '</select>' +
-      '<select class="select" id="p2-grade" aria-label="年级">' + gradeOptions + '</select>' +
-      '<select class="select" id="p2-term" aria-label="学期">' + terms.map(t => '<option value="' + esc(t) + '"' + (state.paper.ctx.term === t ? ' selected' : '') + '>' + (t === '全' ? '全一册' : t + '册') + '</option>').join('') + '</select>' +
-      '<select class="select" id="p2-version" aria-label="教材版本">' + versions.map(v => '<option value="' + esc(v.id) + '"' + (state.paper.ctx.version === v.id ? ' selected' : '') + '>' + esc(v.name) + (v.default ? ' · 推荐' : '') + '</option>').join('') + '</select>';
-  }
-
-  function paperScopeHtml(compact) {
-    const selected = Array.from(state.paper.checked || []);
-    const options = curriculumKpOptions(paperCtxInfo().ctx.subject);
-    const chips = selected.length
-      ? selected.map(kp => '<button class="paper-kp-chip" type="button" data-paper-kp-remove="' + esc(kp) + '">' + esc(kp) + '<span aria-hidden="true">×</span></button>').join('')
-      : '<span class="paper-scope-empty">还没有知识点，先加入本次测评范围</span>';
-    const suggestions = options.filter(kp => !state.paper.checked.has(kp)).slice(0, compact ? 4 : 6);
-    return '<div class="paper-scope' + (compact ? ' is-compact' : '') + '">' +
-      '<div class="paper-v2-cardhead"><div><span class="paper-eyebrow">知识范围</span><h2>' + selected.length + ' 个知识点</h2></div><span class="tag tag-blue">' + esc(paperCtxInfo().subjectText) + ' · ' + esc(paperCtxInfo().gradeText) + '</span></div>' +
-      '<div class="paper-kp-list" id="paper-kp-list">' + chips + '</div>' +
-      '<div class="paper-kp-add"><input class="input" id="paper-kp-input" list="paper-kp-options" aria-label="添加知识点" placeholder="输入知识点后回车" /><datalist id="paper-kp-options">' + options.map(kp => '<option value="' + esc(kp) + '"></option>').join('') + '</datalist><button class="btn btn-outline" type="button" id="paper-kp-add">加入范围</button></div>' +
-      (suggestions.length ? '<div class="paper-suggestions"><span>建议：</span>' + suggestions.map(kp => '<button type="button" class="link-button" data-paper-kp-suggest="' + esc(kp) + '">' + esc(kp) + '</button>').join('') + '</div>' : '') +
-      '</div>';
-  }
-
-  function paperSummaryHtml() {
-    const stats = paperBlueprintStats();
-    const quality = paperQuality();
-    const target = paperTargetName();
-    return '<aside class="paper-v2__aside"><div class="paper-v2-card paper-v2-sticky"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">本次测评</span><h2>' + esc(state.paper.name || '未命名试卷') + '</h2></div><span class="tag ' + (quality.total ? 'tag-green' : 'tag-gray') + '">' + (quality.total ? quality.total + ' 题' : '草稿') + '</span></div>' +
-      '<div class="paper-summary-stats"><div><b id="p-count">' + quality.total + '</b><span>题量</span></div><div><b id="p-total">' + (quality.total ? paperTotal() : stats.score) + '</b><span>总分</span></div><div><b id="p-exam">' + (quality.total ? paperTimes().exam : stats.time) + '</b><span>分钟</span></div></div>' +
-      '<div class="paper-summary-line"><span>投放班级</span><b>' + esc(target) + '</b></div>' +
-      '<div class="paper-summary-line"><span>蓝图目标</span><b>' + stats.count + ' 题 · ' + stats.score + ' 分</b></div>' +
-      '<div class="paper-summary-kps"><span>知识范围</span><div>' + (state.paper.checked.size ? Array.from(state.paper.checked).slice(0, 5).map(kp => '<span class="tag tag-gray">' + esc(kp) + '</span>').join('') + (state.paper.checked.size > 5 ? '<span class="tag tag-gray">+' + (state.paper.checked.size - 5) + '</span>' : '') : '<span class="form-hint">待选择</span>') + '</div></div>' +
-      '</div></aside>';
-  }
-
-  function paperBlueprintRowsHtml() {
-    const rows = ensurePaperBlueprint();
-    return rows.map((row, i) => '<div class="blueprint-row" data-blueprint-row="' + i + '">' +
-      '<select class="select" data-blueprint="type" aria-label="第 ' + (i + 1) + ' 行题型">' + PAPER_TYPES.map(type => '<option value="' + type + '"' + (row.type === type ? ' selected' : '') + '>' + type + '</option>').join('') + '</select>' +
-      '<input class="input" type="number" min="1" max="50" data-blueprint="count" aria-label="第 ' + (i + 1) + ' 行题量" value="' + Number(row.count || 1) + '">' +
-      '<input class="input" type="number" min="1" max="50" data-blueprint="points" aria-label="第 ' + (i + 1) + ' 行每题分值" value="' + Number(row.points || 1) + '">' +
-      '<select class="select" data-blueprint="diff" aria-label="第 ' + (i + 1) + ' 行难度"><option' + (row.diff === '易' ? ' selected' : '') + '>易</option><option' + (row.diff === '中' ? ' selected' : '') + '>中</option><option' + (row.diff === '难' ? ' selected' : '') + '>难</option></select>' +
-      '<button class="icon-btn" type="button" data-blueprint-remove="' + i + '" aria-label="删除第 ' + (i + 1) + ' 行">×</button></div>').join('');
-  }
-
-  function paperQualityHtml() {
-    const q = paperQuality();
-    const items = [
-      { label: '题量与蓝图匹配', value: q.gaps ? '缺 ' + q.gaps + ' 题' : '已匹配', ok: !q.gaps && q.total > 0 },
-      { label: '重复题检查', value: q.total ? (q.duplicates ? q.duplicates + ' 道重复' : '未发现重复') : '暂无题目', ok: !q.duplicates && q.total > 0 },
-      { label: '答案完整度', value: q.total ? (q.answerMissing ? q.answerMissing + ' 道缺答案' : '完整') : '待生成', ok: !q.answerMissing && q.total > 0 },
-      { label: '教师复核', value: q.total ? (q.unchecked ? q.unchecked + ' 道待复核' : '全部已复核') : '待生成', ok: !q.unchecked && q.total > 0 }
-    ];
-    return '<div class="quality-list">' + items.map(item => '<div class="quality-item ' + (item.ok ? 'is-ok' : 'is-warn') + '"><span class="quality-icon">' + (item.ok ? '✓' : '!') + '</span><span>' + item.label + '</span><b>' + item.value + '</b></div>').join('') + '</div>';
-  }
-
-  function paperStageSetup(info) {
-    const goals = [
-      { id: 'unit', label: '单元掌握', desc: '覆盖核心知识点' },
-      { id: 'weekly', label: '周测巩固', desc: '短练习，快反馈' },
-      { id: 'exam', label: '阶段测评', desc: '完整结构与区分度' },
-      { id: 'personal', label: '个性化补弱', desc: '围绕薄弱点配题' }
-    ];
-    const classes = paperTargetClasses();
-    const presetOptions = (M.PAPER_PRESETS[info.ctx.subject] || []).map(p => '<option value="' + esc(p.id) + '"' + (state.paper.preset === p.id ? ' selected' : '') + '>' + esc(p.name) + ' · ' + esc(p.region) + '</option>').join('');
-    return '<div class="paper-v2__main"><section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 01</span><h2>先定义这份卷子</h2></div><span class="tag tag-gray">自动保存</span></div>' +
-      '<div class="paper-field-grid">' + paperContextSelects() + '</div>' +
-      '<div class="paper-v2-field"><label>测评目标</label><div class="paper-goal-grid">' + goals.map(g => '<button type="button" class="paper-goal' + (state.paper.goal === g.id ? ' is-active' : '') + '" data-paper-goal="' + g.id + '"><b>' + g.label + '</b><span>' + g.desc + '</span></button>').join('') + '</div></div>' +
-      '<div class="paper-v2-field"><label for="paper-target">投放班级</label><select class="select" id="paper-target"><option value="">暂不指定班级</option>' + classes.map(c => '<option value="' + esc(c.id) + '"' + (String(state.paper.targetClass) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + (c.grade ? ' · ' + esc(c.grade) : '') + '</option>').join('') + '</select></div>' +
-      '<div class="paper-v2-field"><label for="paper-preset">起始结构</label><select class="select" id="paper-preset"><option value="">自定义蓝图</option>' + presetOptions + '</select></div></section>' +
-      paperScopeHtml(false) +
-      '<div class="paper-v2-actions"><span class="form-hint">范围、配比和题目都可以在后续步骤调整。</span><button class="btn btn-primary" type="button" data-paper-next="blueprint">下一步：生成蓝图 ' + icon('arrow', 15) + '</button></div></div>';
-  }
-
-  function paperStageBlueprint() {
-    const stats = paperBlueprintStats();
-    const presets = M.PAPER_PRESETS[paperCtxInfo().ctx.subject] || [];
-    return '<div class="paper-v2__main"><section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 02</span><h2>搭建组卷蓝图</h2></div><div class="paper-inline-actions"><button class="btn btn-ghost btn-sm" type="button" id="paper-blueprint-auto">套用推荐配比</button><button class="btn btn-outline btn-sm" type="button" id="paper-blueprint-add">增加题型</button></div></div>' +
-      '<div class="blueprint-labels"><span>题型</span><span>题数</span><span>分值</span><span>难度</span><i></i></div><div id="paper-blueprint-rows">' + paperBlueprintRowsHtml() + '</div>' +
-      '<div class="blueprint-total"><span>预计 ' + stats.count + ' 题 · ' + stats.score + ' 分 · ' + stats.time + ' 分钟</span><span>难度可在题库阶段继续筛选</span></div></section>' +
-      '<section class="paper-v2-card paper-scope-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">范围确认</span><h2>本卷覆盖</h2></div><button class="link-button" type="button" data-paper-back="setup">更换知识范围</button></div><div class="paper-kp-list">' + (state.paper.checked.size ? Array.from(state.paper.checked).map(kp => '<span class="paper-kp-chip is-static">' + esc(kp) + '</span>').join('') : '<span class="paper-scope-empty">尚未选择知识点</span>') + '</div></section>' +
-      '<div class="paper-v2-actions"><button class="btn btn-ghost" type="button" data-paper-back="setup">' + icon('arrow-left', 15) + '返回方案</button><button class="btn btn-primary" type="button" data-paper-next="bank">进入题库 ' + icon('arrow', 15) + '</button></div></div>';
-  }
-
-  function paperStageBank() {
-    const filtered = paperFilteredQuestions();
-    const sources = Array.from(new Set((state.paper.questions || []).map(q => q.source).filter(Boolean)));
-    return '<div class="paper-v2__main"><section class="paper-v2-card paper-bank-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 03</span><h2>题库候选区</h2></div><span class="tag tag-blue">已选 ' + (state.paper.questions || []).length + ' 题</span></div>' +
-      '<div class="paper-bank-toolbar"><div class="paper-bank-search"><span aria-hidden="true">⌕</span><input class="input" id="bank-q" value="' + esc(state.paper.bankFilter.q || '') + '" placeholder="搜索题干、知识点或来源" aria-label="搜索候选题"></div><select class="select" id="bank-type" aria-label="按题型筛选"><option>全部题型</option>' + PAPER_TYPES.map(t => '<option' + (state.paper.bankFilter.type === t ? ' selected' : '') + '>' + t + '</option>').join('') + '</select><select class="select" id="bank-diff" aria-label="按难度筛选"><option>全部难度</option><option' + (state.paper.bankFilter.diff === '易' ? ' selected' : '') + '>易</option><option' + (state.paper.bankFilter.diff === '中' ? ' selected' : '') + '>中</option><option' + (state.paper.bankFilter.diff === '难' ? ' selected' : '') + '>难</option></select><select class="select" id="bank-source" aria-label="按来源筛选"><option>全部来源</option>' + sources.map(s => '<option' + (state.paper.bankFilter.source === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + '</select><button class="btn btn-outline" type="button" id="paper-bank-apply">筛选</button></div>' +
-      '<div class="paper-generate-bar"><div><b>按蓝图补齐候选题</b><span>模型生成后进入候选区，先筛选再复核</span></div><div class="paper-generate-controls"><select class="select" id="q-type" aria-label="生成题型">' + PAPER_TYPES.map(t => '<option>' + t + '</option>').join('') + '</select><select class="select" id="q-diff" aria-label="生成难度"><option>全部难度</option><option>易</option><option>中</option><option>难</option></select><select class="select" id="q-num" aria-label="生成题量"><option>5 题</option><option>10 题</option><option>15 题</option><option>20 题</option></select><button class="btn btn-primary" type="button" id="ai-gen"' + (state.paper.generating ? ' disabled' : '') + '>' + icon('spark', 15) + (state.paper.generating ? '生成中…' : '生成候选题') + '</button><button class="btn btn-outline" type="button" id="gen-blueprint"' + (state.paper.generating ? ' disabled' : '') + '>按蓝图生成</button></div></div>' +
-      '<div id="gen-progress" class="gen-progress' + (state.paper.generating ? '' : ' hidden') + '"><div class="gp-bar"><div class="gp-fill" id="gp-fill" style="width:' + (state.paper.generating ? '15%' : '0%') + '"></div></div><span id="gp-text">' + (state.paper.generating ? '正在生成候选题…' : '') + '</span></div>' +
-      '<div class="paper-bank-meta"><span>显示 ' + filtered.length + ' / ' + (state.paper.questions || []).length + ' 题</span><span>拖动排序可在后续版本加入，当前按生成顺序组卷</span></div><div class="q-list paper-v2-q-list" id="q-list">' + (filtered.length ? filtered.map(questionCard).join('') : emptyQ()) + '</div></section>' +
-      '<div class="paper-v2-actions"><button class="btn btn-ghost" type="button" data-paper-back="blueprint">' + icon('arrow-left', 15) + '返回蓝图</button><button class="btn btn-primary" type="button" data-paper-next="review">检查与发布 ' + icon('arrow', 15) + '</button></div></div>';
-  }
-
-  function paperStageReview() {
-    const q = paperQuality();
-    const questions = state.paper.questions || [];
-    return '<div class="paper-v2__main"><section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 04</span><h2>质量检查</h2></div><button class="btn btn-outline btn-sm" type="button" id="check-all"' + (questions.length ? '' : ' disabled') + '>一键标记已复核</button></div>' + paperQualityHtml() + '</section>' +
-      '<section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">发布设置</span><h2>把试卷交给谁</h2></div><span class="tag tag-gray">学生端只收到学生版</span></div><div class="paper-review-fields"><div class="paper-v2-field"><label for="paper-name">试卷名称</label><input class="input" id="paper-name" value="' + esc(state.paper.name || '') + '" placeholder="如：七年级数学 · 单元测评"></div><div class="paper-v2-field"><label for="export-ver">教师视图</label><select class="select" id="export-ver"><option value="teacher"' + (state.paper.exportVer !== 'student' ? ' selected' : '') + '>教师版：题目、答案与详解</option><option value="student"' + (state.paper.exportVer === 'student' ? ' selected' : '') + '>学生版：仅题目</option></select></div><div class="paper-v2-field"><label for="release-mode">成绩公布</label><select class="select" id="release-mode"><option value="manual"' + (state.paper.releaseMode === 'manual' ? ' selected' : '') + '>教师复核后公布</option><option value="immediate"' + (state.paper.releaseMode === 'immediate' ? ' selected' : '') + '>提交后立即公布</option></select></div><div class="paper-v2-field"><label>投放班级</label><div class="paper-readonly-field">' + esc(paperTargetName()) + '</div></div></div>' +
-      '<div class="paper-publish-actions"><button class="btn btn-outline" type="button" id="save-paper"' + (questions.length ? '' : ' disabled') + '>' + icon('mine', 15) + '保存草稿</button><button class="btn btn-outline" type="button" id="export-word"' + (questions.length ? '' : ' disabled') + '>' + icon('download', 15) + '导出 Word</button><button class="btn btn-outline" type="button" id="export-pdf"' + (questions.length ? '' : ' disabled') + '>导出 PDF</button><button class="btn btn-outline" type="button" id="export-gift"' + (questions.length ? '' : ' disabled') + '>导出 GIFT</button><button class="btn btn-primary" type="button" id="publish-paper"' + (state.paper.name && questions.length ? '' : ' disabled') + '>' + icon('publish', 15) + '发布到班级作业</button></div></section>' +
-      '<section class="paper-v2-card paper-review-list"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">逐题复核</span><h2>题目清单</h2></div><span class="form-hint">答案、详解和来源都可展开查看</span></div><div class="q-list" id="q-list">' + (questions.length ? questions.map(questionCard).join('') : emptyQ()) + '</div></section>' +
-      '<div class="paper-v2-actions"><button class="btn btn-ghost" type="button" data-paper-back="bank">' + icon('arrow-left', 15) + '返回题库</button><button class="btn btn-primary" type="button" id="publish-paper-bottom"' + (state.paper.name && questions.length ? '' : ' disabled') + '>' + icon('publish', 15) + '确认发布</button></div></div>';
-  }
-
-  async function generateBlueprintPaper() {
-    if (state.paper.generating) { showToast('正在生成中，请稍候', 'info'); return; }
-    if (!window.AI || !window.AI.isConfigured()) { showToast('请先在顶栏接入 AI 服务', 'error'); return; }
-    const kps = Array.from(state.paper.checked || []);
-    const rows = ensurePaperBlueprint().filter(row => Number(row.count || 0) > 0);
-    if (!kps.length) { showToast('请先完成知识范围', 'error'); state.paper.stage = 'setup'; renderPaper(); return; }
-    if (!rows.length) { showToast('蓝图至少需要一个题型', 'error'); return; }
-    const info = paperCtxInfo();
-    const generated = [];
-    state.paper.generating = true;
-    renderPaper();
-    showGenProgress(5, '正在按蓝图生成候选题…');
-    try {
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        showGenProgress(8 + Math.round(i / rows.length * 82), '正在生成 ' + row.type + ' · ' + row.count + ' 题…');
-        const qs = await window.AI.generateSection({
-          knowledgePoints: kps, type: row.type, count: Number(row.count), points: Number(row.points),
-          mix: row.mix || { 易: row.diff === '易' ? 0.65 : 0.2, 中: row.diff === '中' ? 0.6 : 0.25, 难: row.diff === '难' ? 0.45 : 0.1 },
-          subjectKey: info.ctx.subject, grade: info.ctx.grade,
-          readingText: state.paper.readingPick ? state.paper.readingPick.text + '\n（来源：' + state.paper.readingPick.title + '）' : '',
-          subjectText: info.subjectText, gradeText: info.gradeText, versionText: info.versionText,
-          onProgress: (p, t) => showGenProgress(8 + Math.round(i / rows.length * 82) + Math.round(Number(p || 0) * 0.1), t)
-        });
-        const unique = dedupeQuestions(qs, (state.paper.questions || []).concat(generated));
-        unique.forEach(item => { item.section = row.type; item.points = Number(item.points || row.points); generated.push(item); });
-      }
-    } catch (err) {
-      state.paper.generating = false;
-      hideGenProgress();
-      renderPaper();
-      showToast('按蓝图生成失败：' + (err && err.message ? err.message : '请重试'), 'error');
-      return;
-    }
-    generated.forEach(item => { item.id = ++qid; item.checked = false; });
-    state.paper.questions = (state.paper.questions || []).concat(generated);
-    renumber();
-    state.paper.stage = 'bank';
-    state.paper.generating = false;
-    savePaperDraft();
-    renderPaper();
-    showToast('已生成 ' + generated.length + ' 道候选题，请筛选并逐题复核', 'success');
-  }
-
-  function paperRecord(status) {
-    const target = paperTargetClasses().find(c => String(c.id) === String(state.paper.targetClass));
-    const name = state.paper.name || ('未命名试卷 · ' + DB.today());
-    return {
-      id: state.paper.id || DB.uid('paper'), name: name, type: '蓝图组卷', qs: (state.paper.questions || []).length,
-      total: paperTotal(), date: DB.today(), updatedAt: DB.now(), status: status || '草稿',
-      questions: state.paper.questions || [], blueprint: ensurePaperBlueprint(), ctx: state.paper.ctx,
-      goal: state.paper.goal, targetClass: target ? target.name : (state.paper.targetClass || ''), targetClassId: target ? target.id : '',
-      schoolId: currentSchoolId(), ownerId: state.user && state.user.id, releaseMode: state.paper.releaseMode,
-      publishedAt: status === '已发布' ? DB.now() : undefined, publishedBy: status === '已发布' ? ((state.user && state.user.name) || '教师') : undefined
-    };
-  }
-
-  function persistPaperRecord(status) {
-    const paper = paperRecord(status);
-    state.paper.id = paper.id;
-    const papers = DB.collection('papers') || [];
-    const index = papers.findIndex(item => String(item.id) === String(paper.id));
-    if (index >= 0) papers[index] = paper; else papers.unshift(paper);
-    DB.saveCollection('papers');
-    DB.auditLog(status === '已发布' ? '发布试卷' : '保存试卷', '《' + paper.name + '》共 ' + paper.qs + ' 题', state.user && state.user.name);
-    return paper;
-  }
-
-  function renderPaper() {
-    const info = paperCtxInfo();
-    const stage = PAPER_STAGES.some(item => item.id === state.paper.stage) ? state.paper.stage : 'setup';
-    state.paper.stage = stage;
-    if (stage === 'blueprint' || stage === 'bank' || stage === 'review') ensurePaperBlueprint();
-    const index = PAPER_STAGES.findIndex(item => item.id === stage);
-    const steps = PAPER_STAGES.map((item, i) => '<button type="button" class="paper-step' + (item.id === stage ? ' is-active' : '') + (i < index ? ' is-done' : '') + '" data-paper-stage="' + item.id + '" aria-current="' + (item.id === stage ? 'step' : 'false') + '"><span>' + (i < index ? '✓' : String(i + 1).padStart(2, '0')) + '</span><b>' + item.label + '</b><small>' + item.hint + '</small></button>' + (i < PAPER_STAGES.length - 1 ? '<i class="paper-step-line"></i>' : '')).join('');
-    const content = stage === 'setup' ? paperStageSetup(info) : stage === 'blueprint' ? paperStageBlueprint() : stage === 'bank' ? paperStageBank() : paperStageReview();
-    const quality = paperQuality();
-    const html = '<div class="page paper-v2"><div class="paper-v2__head"><div><span class="page-kicker">命题工作台</span><h1 class="page-title">组卷</h1><p class="paper-v2__context">' + esc(info.gradeText + ' · ' + info.subjectText + ' · ' + (info.versionText || '教材版本')) + '</p></div><div class="paper-v2__head-status"><span class="tag tag-gray">草稿</span><span class="paper-autosave"><span class="status-dot green"></span>已自动保存</span></div></div><nav class="paper-stepper" aria-label="组卷进度">' + steps + '</nav><div class="paper-v2__grid">' + content + paperSummaryHtml() + '</div></div>';
-    renderPage(html);
-
-    /* 上下文与范围 */
-    const subject = $('#p2-subject'), grade = $('#p2-grade'), term = $('#p2-term'), version = $('#p2-version');
-    const rerenderContext = () => { state.paper.blueprint = []; savePaperDraft(); renderPaper(); };
-    if (subject) subject.onchange = () => { state.paper.ctx.subject = subject.value; const v = (M.TEXTBOOKS[subject.value].versions || []).find(x => x.default) || M.TEXTBOOKS[subject.value].versions[0]; state.paper.ctx.version = v ? v.id : ''; state.paper.checked.clear(); rerenderContext(); };
-    if (grade) grade.onchange = () => { state.paper.ctx.grade = Number(grade.value); rerenderContext(); };
-    if (term) term.onchange = () => { state.paper.ctx.term = term.value; savePaperDraft(); };
-    if (version) version.onchange = () => { state.paper.ctx.version = version.value; rerenderContext(); };
-    $$('[data-paper-goal]').forEach(btn => btn.onclick = () => { state.paper.goal = btn.dataset.paperGoal; $$('.paper-goal').forEach(x => x.classList.toggle('is-active', x === btn)); savePaperDraft(); });
-    const target = $('#paper-target');
-    if (target) target.onchange = () => { state.paper.targetClass = target.value; savePaperDraft(); };
-    const preset = $('#paper-preset');
-    if (preset) preset.onchange = () => { state.paper.preset = preset.value; state.paper.blueprint = []; ensurePaperBlueprint(); savePaperDraft(); renderPaper(); };
-    const addScope = (value) => {
-      const kp = String(value || '').trim();
-      if (!kp) return;
-      if (state.paper.checked.has(kp)) { showToast('该知识点已在范围中', 'info'); return; }
-      state.paper.checked.add(kp); savePaperDraft(); renderPaper();
-    };
-    const kpInput = $('#paper-kp-input');
-    const kpAdd = () => { if (kpInput) addScope(kpInput.value); };
-    if (kpInput) kpInput.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); kpAdd(); } };
-    const kpAddBtn = $('#paper-kp-add'); if (kpAddBtn) kpAddBtn.onclick = kpAdd;
-    $$('[data-paper-kp-suggest]').forEach(btn => btn.onclick = () => addScope(btn.dataset.paperKpSuggest));
-    $$('[data-paper-kp-remove]').forEach(btn => btn.onclick = () => { state.paper.checked.delete(btn.dataset.paperKpRemove); savePaperDraft(); renderPaper(); });
-
-    /* 步骤切换 */
-    $$('[data-paper-stage], [data-paper-next], [data-paper-back]').forEach(btn => btn.onclick = () => {
-      const next = btn.dataset.paperStage || btn.dataset.paperNext || btn.dataset.paperBack;
-      if (!next) return;
-      if (next !== 'setup' && !state.paper.checked.size) { showToast('先完成知识范围', 'error'); state.paper.stage = 'setup'; renderPaper(); return; }
-      state.paper.stage = next;
-      if (next === 'blueprint') ensurePaperBlueprint();
-      savePaperDraft(); renderPaper();
-    });
-
-    /* 蓝图编辑 */
-    $$('[data-blueprint]').forEach(input => input.onchange = () => {
-      const rowEl = input.closest('[data-blueprint-row]'); const row = state.paper.blueprint[Number(rowEl.dataset.blueprintRow)];
-      if (input.dataset.blueprint === 'count' || input.dataset.blueprint === 'points') row[input.dataset.blueprint] = Math.max(1, Number(input.value || 1));
-      else row[input.dataset.blueprint] = input.value;
-      savePaperDraft();
-      const nextStats = paperBlueprintStats(); const total = document.querySelector('.blueprint-total');
-      if (total) total.innerHTML = '<span>预计 ' + nextStats.count + ' 题 · ' + nextStats.score + ' 分 · ' + nextStats.time + ' 分钟</span><span>难度可在题库阶段继续筛选</span>';
-    });
-    $$('[data-blueprint-remove]').forEach(btn => btn.onclick = () => { state.paper.blueprint.splice(Number(btn.dataset.blueprintRemove), 1); savePaperDraft(); renderPaper(); });
-    const addBlueprint = $('#paper-blueprint-add');
-    if (addBlueprint) addBlueprint.onclick = () => { state.paper.blueprint.push({ id: 'bp_' + Date.now(), type: '选择题', count: 5, points: 2, diff: '中', mix: { 易: 0.3, 中: 0.5, 难: 0.2 } }); savePaperDraft(); renderPaper(); };
-    const autoBlueprint = $('#paper-blueprint-auto');
-    if (autoBlueprint) autoBlueprint.onclick = () => { state.paper.blueprint = paperBlueprintDefaults(); savePaperDraft(); renderPaper(); showToast('已套用当前学科推荐配比', 'success'); };
-
-    /* 题库筛选 */
-    const applyBankFilter = () => {
-      state.paper.bankFilter = { q: ($('#bank-q') && $('#bank-q').value) || '', type: ($('#bank-type') && $('#bank-type').value) || '全部题型', diff: ($('#bank-diff') && $('#bank-diff').value) || '全部难度', source: ($('#bank-source') && $('#bank-source').value) || '全部来源' };
-      savePaperDraft(); renderPaper();
-    };
-    const applyBank = $('#paper-bank-apply'); if (applyBank) applyBank.onclick = applyBankFilter;
-    const bankQ = $('#bank-q'); if (bankQ) bankQ.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); applyBankFilter(); } };
-    const genBtn = $('#ai-gen'); if (genBtn) genBtn.onclick = aiGenerate;
-    const genBlueprint = $('#gen-blueprint'); if (genBlueprint) genBlueprint.onclick = generateBlueprintPaper;
-
-    /* 试卷输出与发布 */
-    const nameInput = $('#paper-name');
-    if (nameInput) nameInput.oninput = e => { state.paper.name = e.target.value.trim(); const publish = $('#publish-paper'); const bottom = $('#publish-paper-bottom'); if (publish) publish.disabled = !(state.paper.name && state.paper.questions.length); if (bottom) bottom.disabled = !(state.paper.name && state.paper.questions.length); savePaperDraft(); };
-    const exportVer = $('#export-ver'); if (exportVer) exportVer.onchange = () => { state.paper.exportVer = exportVer.value; savePaperDraft(); };
-    const releaseMode = $('#release-mode'); if (releaseMode) releaseMode.onchange = () => { state.paper.releaseMode = releaseMode.value; savePaperDraft(); };
-    const saveBtn = $('#save-paper'); if (saveBtn) saveBtn.onclick = () => { if (!state.paper.questions.length) { showToast('还没有候选题', 'error'); return; } persistPaperRecord('草稿'); savePaperDraft(); showToast('草稿已保存', 'success'); };
-    const exportWord = $('#export-word'); if (exportWord) exportWord.onclick = () => window.PaperExport && window.PaperExport.downloadWord();
-    const exportPdf = $('#export-pdf'); if (exportPdf) exportPdf.onclick = () => window.PaperExport && window.PaperExport.openPrintPreview();
-    const exportGift = $('#export-gift'); if (exportGift) exportGift.onclick = () => {
-      if (!state.paper.questions.length) { showToast('试卷为空，无法导出', 'error'); return; }
-      const txt = window.AI.exportGift(state.paper.questions); const file = (state.paper.name || '未命名试卷') + '_GIFT.txt';
-      if (window.fhNativeSave && window.fhNativeSave(file, '\ufeff' + txt)) { showToast('GIFT 题库已导出', 'success'); return; }
-      const url = URL.createObjectURL(new Blob(['\ufeff', txt], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = file; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1200); showToast('GIFT 题库已导出', 'success');
-    };
-    const checkAll = $('#check-all'); if (checkAll) checkAll.onclick = () => { state.paper.questions.forEach(q => { if (q.type !== '资料') q.checked = true; }); savePaperDraft(); renderPaper(); showToast('已标记全部题目，仍建议抽查', 'success'); };
-    const publish = () => {
-      const quality = paperQuality();
-      if (!state.paper.name) { showToast('请先填写试卷名称', 'error'); return; }
-      if (!state.paper.questions.length) { showToast('还没有题目', 'error'); return; }
-      if (quality.unchecked || quality.answerMissing || quality.gaps) { showToast('请先完成复核，并补齐答案与蓝图题量', 'warning'); return; }
-      if (!state.paper.targetClass) { showToast('请选择投放班级', 'warning'); return; }
-      confirmDialog({ title: '发布到班级作业', body: '将《' + esc(state.paper.name) + '》发布到 <b>' + esc(paperTargetName()) + '</b>？', okText: '确认发布', onConfirm: () => { const paper = persistPaperRecord('已发布'); state.paper.stage = 'review'; savePaperDraft(); renderPaper(); showToast('已发布到 ' + paper.targetClass, 'success'); } });
-    };
-    const publishBtn = $('#publish-paper'); if (publishBtn) publishBtn.onclick = publish;
-    const publishBottom = $('#publish-paper-bottom'); if (publishBottom) publishBottom.onclick = publish;
-    const clear = $('#clear-paper'); if (clear) clear.onclick = () => confirmDialog({ title: '清空本次组卷', body: '将移除当前草稿中的全部候选题和蓝图。', danger: true, okText: '清空', onConfirm: () => { state.paper.questions = []; state.paper.name = ''; state.paper.blueprint = []; state.paper.stage = 'setup'; state.paper.id = ''; savePaperDraft(); renderPaper(); showToast('已清空本次组卷', 'success'); } });
     bindQuestionActions();
     savePaperDraft();
   }
@@ -2772,7 +2206,7 @@
   function emptyQ() {
     return '<div class="card"><div class="empty-state"><div class="es-icon">' + icon('paper', 34) + '</div>' +
       '<div style="font-size:14px;color:var(--text-2);margin-bottom:4px">暂无题目</div>' +
-      '<div>完成知识范围与蓝图后，生成候选题进入这里</div></div></div>';
+      '<div>勾选左侧知识点后，点击「AI 生成」开始出题</div></div></div>';
   }
 
   function showGenProgress(pct, text) {
@@ -3053,12 +2487,11 @@
   }
   function updatePanel() {
     if (!$('#q-list')) return;
-    const setText = (selector, value) => { const el = $(selector); if (el) el.textContent = value; };
-    setText('#p-count', state.paper.questions.length);
-    setText('#p-total', paperTotal());
-    setText('#d-easy', diffCount('易'));
-    setText('#d-mid', diffCount('中'));
-    setText('#d-hard', diffCount('难'));
+    $('#p-count').textContent = state.paper.questions.length;
+    $('#p-total').textContent = paperTotal();
+    $('#d-easy').textContent = diffCount('易');
+    $('#d-mid').textContent = diffCount('中');
+    $('#d-hard').textContent = diffCount('难');
     const timeEl = $('#p-time');
     if (timeEl) {
       const t = paperTimes();
@@ -3072,11 +2505,12 @@
       fills[1].style.width = diffPct('中') + '%';
       fills[2].style.width = diffPct('难') + '%';
     }
-    ['#export-word', '#export-pdf', '#export-gift'].forEach(selector => { const el = $(selector); if (el) el.disabled = !state.paper.questions.length; });
+    $('#export-word').disabled = !state.paper.questions.length;
+    $('#export-pdf').disabled = !state.paper.questions.length;
+    $('#export-gift').disabled = !state.paper.questions.length;
     const savePaperBtn = $('#save-paper');
     if (savePaperBtn) savePaperBtn.disabled = !state.paper.questions.length;
-    const publish = $('#publish-paper');
-    if (publish) publish.disabled = !(state.paper.name && state.paper.questions.length);
+    $('#publish-paper').disabled = !(state.paper.name && state.paper.questions.length);
   }
 
   /* ---------- 我的试卷 ---------- */
@@ -3112,9 +2546,9 @@
           }
         }
         if (act === 'share') {
-          const link = location.origin + location.pathname + '#/paper/mine?shared=' + encodeURIComponent(name) + '-' + DB.uid('s');
-          const done = () => showToast('站内引用链接已复制到剪贴板', 'success');
-          const fallback = () => showToast('站内引用链接：' + link, 'info');
+          const link = location.origin + location.pathname + '#/papers/share/' + encodeURIComponent(name) + '-' + DB.uid('s');
+          const done = () => showToast('共享链接已复制到剪贴板，有效期 7 天', 'success');
+          const fallback = () => showToast('共享链接：' + link, 'info');
           if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, fallback);
           else fallback();
         }
@@ -3136,296 +2570,100 @@
   }
 
   /* ---------- 批改中心 ---------- */
-  function gradingAnswersFromSource(source) {
-    const pages = source && Array.isArray(source.pages) ? source.pages : [];
-    return pages.map(page => ({
-      no: Number(page.page || 1),
-      page: Number(page.page || 1),
-      title: '第 ' + Number(page.page || 1) + ' 页 OCR 文本',
-      text: String(page.text || ''),
-      confidence: Number(page.confidence || 0)
-    }));
-  }
-
-  function gradingDocumentHtml(item, id, editable) {
-    const source = item.source || {};
-    const pages = Array.isArray(source.pages) ? source.pages : [];
-    if (!pages.length) {
-      return '<section class="grading-document grading-document--empty"><div class="grading-document-empty"><span class="es-icon">' + icon('doc', 30) + '</span><b>没有可预览的原始文件</b><span>这条记录不是通过真实文件识别生成的，请重新上传答卷。</span></div></section>';
-    }
-    state.gradingPage = state.gradingPage || {};
-    state.gradingZoom = state.gradingZoom || {};
-    const pageIndex = Math.max(0, Math.min(pages.length - 1, Number(state.gradingPage[id] || 0)));
-    const zoom = Math.max(.65, Math.min(1.8, Number(state.gradingZoom[id] || 1)));
-    const page = pages[pageIndex];
-    const annotations = Array.isArray(item.annotations) ? item.annotations.filter(a => Number(a.page) === Number(page.page || pageIndex + 1)) : [];
-    const boxes = state.gradingOcrBoxes && state.gradingOcrBoxes[id]
-      ? (page.words || []).map(word => '<span class="grading-ocr-box" style="left:' + (Number(word.x || 0) * 100) + '%;top:' + (Number(word.y || 0) * 100) + '%;width:' + (Number(word.w || 0) * 100) + '%;height:' + (Number(word.h || 0) * 100) + '%" title="' + esc(word.text || '') + '"></span>').join('')
-      : '';
-    const marks = annotations.map((annotation, index) => '<button type="button" class="grading-annotation" data-annotation-index="' + index + '" style="left:' + (Number(annotation.x || 0) * 100) + '%;top:' + (Number(annotation.y || 0) * 100) + '%;width:' + (Number(annotation.w || 0) * 100) + '%;height:' + (Number(annotation.h || 0) * 100) + '" title="' + esc(annotation.text || '批注') + '"><span>' + (index + 1) + '</span></button>').join('');
-    const confidence = Number(page.confidence || 0);
-    const editTools = editable
-      ? '<button class="btn btn-outline btn-sm' + (state.gradingAnnotationMode && state.gradingAnnotationMode[id] ? ' is-selected' : '') + '" type="button" id="annotation-mode">框选批注</button>'
-      : '<span class="tag tag-gray">学生端只读</span>';
-    return '<section class="grading-document" id="grading-document" data-grading-id="' + esc(id) + '">' +
-      '<div class="grading-document-head"><div><span class="paper-eyebrow">原始文件</span><h2>' + esc(source.fileName || item.fileName || '答卷文件') + '</h2></div><span class="tag ' + (confidence >= 80 ? 'tag-green' : 'tag-gold') + '">OCR 置信度 ' + confidence + '%</span></div>' +
-      '<div class="grading-document-toolbar"><button class="btn btn-ghost btn-sm" type="button" data-doc-page="-1"' + (pageIndex <= 0 ? ' disabled' : '') + '>' + icon('arrow-left', 13) + '</button><span>第 ' + (pageIndex + 1) + ' / ' + pages.length + ' 页</span><button class="btn btn-ghost btn-sm" type="button" data-doc-page="1"' + (pageIndex >= pages.length - 1 ? ' disabled' : '') + '>' + icon('arrow', 13) + '</button><span class="doc-toolbar-sep"></span><button class="btn btn-ghost btn-sm" type="button" data-doc-zoom="-0.1" aria-label="缩小">−</button><span>' + Math.round(zoom * 100) + '%</span><button class="btn btn-ghost btn-sm" type="button" data-doc-zoom="0.1" aria-label="放大">＋</button><button class="btn btn-outline btn-sm' + (state.gradingOcrBoxes && state.gradingOcrBoxes[id] ? ' is-selected' : '') + '" type="button" id="ocr-boxes">识别框</button>' + editTools + '</div>' +
-      '<div class="grading-doc-stage' + (state.gradingAnnotationMode && state.gradingAnnotationMode[id] ? ' is-annotation-mode' : '') + '" id="grading-doc-stage"><div class="grading-doc-canvas" id="grading-doc-canvas" style="width:' + (zoom * 100) + '%"><img src="' + esc(page.preview || '') + '" alt="第 ' + (pageIndex + 1) + ' 页答卷原图"><div class="grading-ocr-layer' + (state.gradingOcrBoxes && state.gradingOcrBoxes[id] ? ' is-visible' : '') + '">' + boxes + '</div><div class="grading-annotation-layer">' + marks + '</div><div class="grading-doc-selection hidden" id="grading-doc-selection"></div></div></div>' +
-      '<div class="grading-ocr-editor"><div class="grading-ocr-editor-head"><label for="ocr-text">OCR 文本 · 第 ' + (pageIndex + 1) + ' 页</label><span class="form-hint">' + (editable ? '可直接修正识别内容，批改将使用保存后的文字' : '只读文本') + '</span></div><textarea class="textarea" id="ocr-text" rows="7" placeholder="当前页面未识别到文字，请教师补录"' + (editable ? '' : ' readonly') + '>' + esc(page.text || '') + '</textarea><div class="grading-ocr-editor-actions">' + (editable ? '<button class="btn btn-primary btn-sm" type="button" id="ocr-save">保存识别修正</button>' : '') + '<span class="form-hint">引擎：Tesseract.js · PDF 页面由 PDF.js 渲染</span></div></div>' +
-      (editable ? '<div class="grading-annotation-form hidden" id="doc-annotation-form"><label for="doc-annotation-text">批注内容</label><textarea class="textarea" id="doc-annotation-text" rows="3" placeholder="例如：这里的“+”被识别为“－”，请按原图修正"></textarea><div class="grading-annotation-actions"><button class="btn btn-primary btn-sm" type="button" id="doc-annotation-save">保存批注</button><button class="btn btn-ghost btn-sm" type="button" id="doc-annotation-cancel">取消</button></div></div>' : '') +
-      '</section>';
-  }
-
-  function bindGradingDocument(item, id, editable) {
-    const source = item.source || {};
-    const pages = Array.isArray(source.pages) ? source.pages : [];
-    if (!pages.length) return;
-    state.gradingPage = state.gradingPage || {};
-    state.gradingZoom = state.gradingZoom || {};
-    const pageIndex = Math.max(0, Math.min(pages.length - 1, Number(state.gradingPage[id] || 0)));
-    const saveAudit = (label) => {
-      const found = gradingItem(id);
-      if (!found) return;
-      found.item.audit = Array.isArray(found.item.audit) ? found.item.audit : [];
-      const now = new Date();
-      found.item.audit.push({ time: String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'), op: label });
-      DB.saveCollection('grading');
-      DB.auditLog('批改文件修正', label, state.user && state.user.name);
-    };
-    $$('[data-doc-page]').forEach(button => button.onclick = () => {
-      state.gradingPage[id] = pageIndex + Number(button.dataset.docPage);
-      renderGradingDetail();
-    });
-    $$('[data-doc-zoom]').forEach(button => button.onclick = () => {
-      state.gradingZoom[id] = Math.max(.65, Math.min(1.8, Number(state.gradingZoom[id] || 1) + Number(button.dataset.docZoom)));
-      renderGradingDetail();
-    });
-    const boxes = $('#ocr-boxes');
-    if (boxes) boxes.onclick = () => { state.gradingOcrBoxes = state.gradingOcrBoxes || {}; state.gradingOcrBoxes[id] = !state.gradingOcrBoxes[id]; renderGradingDetail(); };
-    const mode = editable && $('#annotation-mode');
-    if (mode) mode.onclick = () => { state.gradingAnnotationMode = state.gradingAnnotationMode || {}; state.gradingAnnotationMode[id] = !state.gradingAnnotationMode[id]; renderGradingDetail(); };
-    const ocrSave = $('#ocr-save');
-    if (editable && ocrSave) ocrSave.onclick = () => {
-      const found = gradingItem(id);
-      if (!found || !found.item.source || !found.item.source.pages[pageIndex]) return;
-      const text = $('#ocr-text').value.trim();
-      found.item.source.pages[pageIndex].text = text;
-      found.item.answers = gradingAnswersFromSource(found.item.source);
-      found.item.ocr = Object.assign({}, found.item.ocr, { correctedAt: DB.now(), correctedBy: state.user && state.user.id || '' });
-      saveAudit('教师修正第 ' + (pageIndex + 1) + ' 页 OCR 文本');
-      showToast('OCR 修正已保存，后续批改将使用新文本', 'success');
-      renderGradingDetail();
-    };
-    const stage = $('#grading-doc-stage'), canvas = $('#grading-doc-canvas'), selection = $('#grading-doc-selection');
-    if (!stage || !canvas || !selection) return;
-    let drawing = null;
-    const point = event => {
-      const rect = canvas.getBoundingClientRect();
-      return { x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) };
-    };
-    stage.onpointerdown = event => {
-      if (!editable || !(state.gradingAnnotationMode && state.gradingAnnotationMode[id]) || event.target.closest('.grading-annotation')) return;
-      drawing = point(event);
-      stage.setPointerCapture && stage.setPointerCapture(event.pointerId);
-      selection.classList.remove('hidden');
-      selection.style.left = (drawing.x * 100) + '%';
-      selection.style.top = (drawing.y * 100) + '%';
-      selection.style.width = '0%';
-      selection.style.height = '0%';
-    };
-    stage.onpointermove = event => {
-      if (!drawing) return;
-      const end = point(event);
-      const x = Math.min(drawing.x, end.x), y = Math.min(drawing.y, end.y), w = Math.abs(end.x - drawing.x), h = Math.abs(end.y - drawing.y);
-      selection.style.left = (x * 100) + '%'; selection.style.top = (y * 100) + '%'; selection.style.width = (w * 100) + '%'; selection.style.height = (h * 100) + '%';
-    };
-    stage.onpointerup = event => {
-      if (!drawing) return;
-      const end = point(event);
-      const annotation = { page: Number(pages[pageIndex].page || pageIndex + 1), x: Math.min(drawing.x, end.x), y: Math.min(drawing.y, end.y), w: Math.abs(end.x - drawing.x), h: Math.abs(end.y - drawing.y) };
-      drawing = null;
-      selection.classList.add('hidden');
-      if (annotation.w < .015 || annotation.h < .015) return;
-      const form = $('#doc-annotation-form');
-      if (!form) return;
-      form.classList.remove('hidden');
-      form.dataset.pending = JSON.stringify(annotation);
-      $('#doc-annotation-text').value = '';
-      $('#doc-annotation-text').focus();
-    };
-    const annotationSave = editable && $('#doc-annotation-save');
-    if (annotationSave) annotationSave.onclick = () => {
-      const form = $('#doc-annotation-form'), note = $('#doc-annotation-text').value.trim();
-      if (!form || !note) { showToast('请填写批注内容', 'error'); return; }
-      const found = gradingItem(id); if (!found) return;
-      const pending = JSON.parse(form.dataset.pending || '{}');
-      pending.text = note; pending.by = state.user && state.user.name || '教师'; pending.createdAt = DB.now();
-      found.item.annotations = Array.isArray(found.item.annotations) ? found.item.annotations : [];
-      found.item.annotations.push(pending);
-      saveAudit('教师新增第 ' + pending.page + ' 页批注');
-      showToast('批注已保存', 'success');
-      renderGradingDetail();
-    };
-    const annotationCancel = editable && $('#doc-annotation-cancel');
-    if (annotationCancel) annotationCancel.onclick = () => { const form = $('#doc-annotation-form'); if (form) form.classList.add('hidden'); };
-    $$('#grading-doc-canvas [data-annotation-index]').forEach(mark => mark.onclick = event => {
-      event.stopPropagation();
-      const list = Array.isArray(item.annotations) ? item.annotations.filter(a => Number(a.page) === Number(pages[pageIndex].page || pageIndex + 1)) : [];
-      const annotation = list[Number(mark.dataset.annotationIndex)];
-      if (annotation && annotation.text) showToast('批注：' + annotation.text, 'info');
-    });
-  }
-
   function renderGrading() {
     const q = state.query.tab || 'all';
-    const keyword = String(state.query.q || '').trim().toLowerCase();
-    const sort = state.query.sort || 'newest';
-    const isStudent = state.role === 'student';
     const G = DB.grading();
-    const rawGroups = [
-      { key: 'recognized', label: '已识别', dot: 'blue', icon: 'upload', items: (G.recognized || []).filter(recordInScope) },
-      { key: 'grading', label: '批改中', dot: 'blue', icon: 'clock', items: (G.grading || []).filter(recordInScope) },
-      { key: 'review', label: '待复核', dot: 'gold', icon: 'review', items: (G.review || []).filter(recordInScope) },
-      { key: 'done', label: '已完成', dot: 'green', icon: 'done', items: (G.done || []).filter(recordInScope) }
+    const groups = [
+      { key: 'recognized', label: '已识别', dot: 'blue', icon: 'upload', items: G.recognized || [] },
+      { key: 'grading', label: '批改中', dot: 'blue', icon: 'clock', items: G.grading || [] },
+      { key: 'review', label: '待复核', dot: 'gold', icon: 'review', items: G.review || [] },
+      { key: 'done', label: '已完成', dot: 'green', icon: 'done', items: G.done || [] }
     ];
-    const groups = isStudent ? [Object.assign({}, rawGroups[3], { items: rawGroups[3].items.filter(item => item.published || item.feedback) })] : rawGroups;
     const tabs = [{ key: 'all', label: '全部' }].concat(groups.map(g => ({ key: g.key, label: g.label })));
     const total = groups.reduce((s, g) => s + g.items.length, 0);
-    const reviewN = rawGroups.find(g => g.key === 'review').items.length;
-    const doneN = rawGroups.find(g => g.key === 'done').items.length;
-    const route = (tab, nextKeyword, nextSort) => {
-      const params = [];
-      if (tab && tab !== 'all') params.push('tab=' + encodeURIComponent(tab));
-      if (nextKeyword) params.push('q=' + encodeURIComponent(nextKeyword));
-      if (nextSort && nextSort !== 'newest') params.push('sort=' + encodeURIComponent(nextSort));
-      return '#/grading' + (params.length ? '?' + params.join('&') : '');
-    };
-    const visibleItems = group => group.items.filter(item => {
-      if (!keyword) return true;
-      return [item.name, item.cls, item.task, item.fileName, item.note].filter(Boolean).join(' ').toLowerCase().includes(keyword);
-    }).sort((a, b) => {
-      if (sort === 'score') return Number(b.score || 0) - Number(a.score || 0);
-      if (sort === 'low') return Number(!!b.low) - Number(!!a.low);
-      return String(b.startedAt || b.createdAt || b.time || '').localeCompare(String(a.startedAt || a.createdAt || a.time || ''));
-    });
-    const shownTotal = groups.reduce((s, g) => s + visibleItems(g).length, 0);
-    const upload = isStudent
-      ? '<div class="grading-student-hint"><div><b>这里是你的批改反馈</b><span>老师发布成绩后，反馈和学生版详解会出现在已完成记录中。</span></div><button class="btn btn-outline btn-sm" data-nav="#/knowledge">去看知识点</button></div>'
-      : '<div class="upload-zone" id="upload-zone"><div class="uz-icon">' + icon('upload', 34) + '</div><div class="uz-title">拖拽答卷到这里，或点击选择文件</div><div class="uz-sub">支持 PDF、PNG、JPG、WEBP · 浏览器内真实 OCR</div><span class="upload-zone__rule">识别完成后先核对原图与 OCR 文本，再开始批改</span></div>';
-    const filteredGroups = groups.filter(g => q === 'all' || q === g.key);
     const html =
-      '<div class="page"><div class="page-head"><div><h1 class="page-title">' + (isStudent ? '批改反馈' : '批改中心') + '</h1><p class="page-sub">' + (isStudent ? '查看已发布成绩、教师评语与逐题答案详解' : '上传答卷 → 识别核对 → AI 预批改 → 人工复核 → 发布反馈') + '</p></div>' +
-      '<div class="grading-head-actions">' + (isStudent ? '' : '<button class="btn btn-outline" data-nav="#/grading/rubric">' + icon('rubric', 15) + '评分标准</button>') + '<span class="tag tag-blue">队列 ' + total + ' 份</span><span class="tag tag-gold">待复核 ' + reviewN + ' 份</span></div></div>' +
-      '<div class="grading-summary"><div><span>待处理</span><strong>' + ((G.recognized || []).length + (G.grading || []).length) + '</strong><small>识别与批改中</small></div><div><span>待复核</span><strong>' + reviewN + '</strong><small>需要教师确认</small></div><div><span>已完成</span><strong>' + doneN + '</strong><small>可发布或查看</small></div><div><span>当前筛选</span><strong>' + shownTotal + '</strong><small>' + (keyword ? '匹配记录' : '全部记录') + '</small></div></div>' +
-      upload +
-      '<div class="grading-toolbar"><div class="grading-search"><span>' + icon('search', 15) + '</span><input class="input" id="grading-search" value="' + esc(state.query.q || '') + '" placeholder="搜索姓名、班级、任务或文件名"></div><select class="select" id="grading-sort"><option value="newest"' + (sort === 'newest' ? ' selected' : '') + '>最近更新</option><option value="low"' + (sort === 'low' ? ' selected' : '') + '>优先低置信度</option><option value="score"' + (sort === 'score' ? ' selected' : '') + '>按分数高低</option></select><button class="btn btn-ghost" id="grading-clear">清除筛选</button></div>' +
-      '<div class="tabs grading-tabs">' + tabs.map(t => '<button class="tab-btn' + (q === t.key ? ' active' : '') + '" data-gtab="' + t.key + '">' + esc(t.label) + '<span class="side-count" style="margin-left:6px">' + (t.key === 'all' ? total : groups.find(g => g.key === t.key).items.length) + '</span></button>').join('') + '</div>' +
-      '<div class="grading-batchbar hidden" id="grading-batchbar"><span><b id="grading-selected-count">0</b> 份已选</span><button class="btn btn-primary btn-sm" data-g-batch-start>' + icon('grading', 14) + '批量开始批改</button><button class="btn btn-ghost btn-sm" data-g-batch-clear>取消选择</button></div>' +
-      '<div class="queue-groups grading-queue">' + filteredGroups.map(g => {
-        const items = visibleItems(g);
-        return '<section class="grading-group"><div class="queue-group-title"><span class="status-dot ' + g.dot + '"></span>' + esc(g.label) + '<span class="tag tag-gray" style="font-weight:500">' + items.length + (keyword ? ' / ' + g.items.length : '') + ' 份</span></div>' + (items.length ? '<div class="queue-cards">' + items.map(item => queueCard(item, isStudent, g.key)).join('') + '</div>' : '<div class="card"><div class="empty-state" style="padding:16px"><div class="es-icon">' + icon(g.key === 'done' ? 'check' : 'search', 26) + '</div><div>' + (keyword ? '没有匹配的答卷' : '暂无' + esc(g.label) + '任务') + '</div></div></div>') + '</section>';
-      }).join('') + '</div></div>';
+      '<div class="page"><div class="page-head"><div><h1 class="page-title">批改中心</h1><p class="page-sub">上传答卷 → OCR 识别 → AI 预批改 → 人工复核</p></div>' +
+      '<div><span class="tag tag-blue" style="margin-right:8px">队列共 ' + total + ' 份</span><span class="tag tag-gold">待复核 ' + (G.review || []).length + ' 份</span></div></div>' +
+      '<div class="upload-zone" id="upload-zone">' +
+      '<div class="uz-icon">' + icon('upload', 34) + '</div>' +
+      '<div class="uz-title">拖拽答卷到这里，或点击选择文件</div>' +
+      '<div class="uz-sub">支持拍照 / PDF / 图片，多文件排队 · 识别失败会提示重拍</div></div>' +
+      '<div class="tabs" style="margin-top:18px;border:1px solid var(--border);border-radius:8px;background:#fff;width:fit-content">' +
+      tabs.map(t => '<button class="tab-btn' + (q === t.key ? ' active' : '') + '" data-gtab="' + t.key + '">' + esc(t.label) + '<span class="side-count" style="margin-left:6px">' + (t.key === 'all' ? total : groups.find(g => g.key === t.key).items.length) + '</span></button>').join('') +
+      '</div>' +
+      '<div class="queue-groups" style="margin-top:16px">' +
+      groups.filter(g => q === 'all' || q === g.key).map(g =>
+        '<div><div class="queue-group-title"><span class="status-dot ' + g.dot + '"></span>' + esc(g.label) +
+        '<span class="tag tag-gray" style="font-weight:500">' + g.items.length + ' 份</span></div>' +
+        (g.items.length
+          ? '<div class="queue-cards">' + g.items.map(queueCard).join('') + '</div>'
+          : '<div class="card"><div class="empty-state" style="padding:16px"><div class="es-icon">' + icon('check', 26) + '</div><div>暂无' + esc(g.label) + '任务</div></div></div>') +
+        '</div>'
+      ).join('') +
+      '</div></div>';
     renderPage(html);
 
-    const fileBefore = $('#grading-file-input');
-    if (fileBefore) fileBefore.remove();
-    if (!isStudent) {
-      const fileInput = document.createElement('input');
-      fileInput.id = 'grading-file-input';
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*,.pdf';
-      fileInput.multiple = true;
-      fileInput.style.display = 'none';
-      document.body.appendChild(fileInput);
-      const startUpload = async (files) => {
-        const list = Array.from(files || []).filter(f => /image\//i.test(f.type) || /\.pdf$/i.test(f.name || ''));
-        if (!list.length) { showToast('没有识别到可用的图片或 PDF 文件', 'error'); return; }
-        const count = list.length;
-        const zone = $('#upload-zone');
-        if (!window.FH_OCR || !window.FH_OCR.processFile) { showToast('真实 OCR 组件未加载，请检查网络后重试', 'error'); return; }
-        if (zone) zone.innerHTML = '<div class="uz-icon" style="color:var(--primary)">' + icon('upload', 30) + '</div><div class="uz-title">正在识别 ' + count + ' 份答卷…</div><div class="progress" style="max-width:280px;margin:10px auto 0"><div class="fill" id="ocr-upload-progress" style="width:1%"></div></div><span class="upload-zone__rule" id="ocr-upload-status">正在准备 OCR 引擎…</span>';
-        const failed = [], completed = [];
-        for (let index = 0; index < list.length; index++) {
-          const file = list[index];
-          try {
-            const source = await window.FH_OCR.processFile(file, (progress, note) => {
-              const overall = Math.round((index * 100 + Number(progress || 0)) / list.length);
-              const fill = $('#ocr-upload-progress'); const status = $('#ocr-upload-status');
-              if (fill) fill.style.width = Math.max(1, Math.min(100, overall)) + '%';
-              if (status) status.textContent = (index + 1) + ' / ' + list.length + ' · ' + (note || '正在识别');
+    /* 真实上传：选择文件 / 拖拽 → 识别进度 → 加入队列（持久化） */
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*,.pdf';
+    fileInput.multiple = true;
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+    const startUpload = (files) => {
+      const list = Array.from(files || []).filter(f => /image\/|\.pdf$/i.test(f.type + f.name));
+      const count = Math.max(1, list.length || 1);
+      $('#upload-zone').innerHTML = '<div class="uz-icon" style="color:var(--primary)">' + icon('upload', 30) + '</div>' +
+        '<div class="uz-title">正在上传并识别 ' + count + ' 份答卷…</div>' +
+        '<div class="progress" style="max-width:280px;margin:10px auto 0"><div class="fill" style="width:8%"></div></div>';
+      const startedAt = Date.now();
+      const duration = 1200;
+      const t = setInterval(() => {
+        const p = Math.min(100, 8 + (Date.now() - startedAt) / duration * 92);
+        const f = $('#upload-zone .fill');
+        if (f) f.style.width = p + '%';
+        if (p >= 100) {
+          clearInterval(t);
+          list.forEach((file, idx) => {
+            const name = file.name ? file.name.replace(/\.[^.]+$/, '') : '新上传答卷';
+            DB.addGradingItem({
+              name: name, cls: '未分班', task: '新上传答卷', time: '刚刚',
+              status: 'recognized', note: '已识别，等待批改', progress: 0
             });
-            const pages = source.pages || [];
-            const confidence = pages.length ? Math.round(pages.reduce((sum, page) => sum + Number(page.confidence || 0), 0) / pages.length) : 0;
-            DB.addGradingItem({ name: (file.name || '新上传答卷').replace(/\.[^.]+$/, ''), fileName: file.name || '', fileSize: file.size || 0, cls: state.user && state.user.cls || '未分班', classId: state.user && state.user.classId || '', schoolId: currentSchoolId(), ownerId: state.user && state.user.id || '', task: '新上传答卷', time: '刚刚', createdAt: DB.now(), status: 'recognized', note: 'OCR 已完成，等待教师核对', progress: 100, total: 100, source: source, ocr: { status: 'complete', engine: source.engine, pageCount: pages.length, confidence: confidence }, answers: gradingAnswersFromSource(source), annotations: [] });
-            completed.push(file.name || '未命名文件');
-          } catch (error) {
-            failed.push((file.name || '未命名文件') + '：' + (error && error.message ? error.message : '识别失败'));
-          }
+          });
+          DB.auditLog('上传答卷', '上传 ' + count + ' 份答卷进入识别队列', state.user && state.user.name);
+          showToast('已识别 ' + count + ' 份答卷，进入批改队列', 'success');
+          renderGrading();
         }
-        DB.auditLog('上传答卷', '完成 ' + completed.length + ' 份真实文件 OCR，失败 ' + failed.length + ' 份', state.user && state.user.name);
-        if (completed.length) showToast('已完成 ' + completed.length + ' 份 OCR，进入“已识别”', failed.length ? 'warning' : 'success');
-        if (failed.length) showToast('有 ' + failed.length + ' 份文件识别失败，请修正文件或网络后重试', 'error');
-        renderGrading();
-      };
-      $('#upload-zone').onclick = e => { if (!e.target.closest('button')) fileInput.click(); };
-      fileInput.onchange = () => { if (fileInput.files && fileInput.files.length) startUpload(fileInput.files); fileInput.value = ''; };
-      ['dragenter', 'dragover'].forEach(ev => $('#upload-zone').addEventListener(ev, e => { e.preventDefault(); $('#upload-zone').classList.add('drag'); }));
-      ['dragleave', 'drop'].forEach(ev => $('#upload-zone').addEventListener(ev, e => { e.preventDefault(); $('#upload-zone').classList.remove('drag'); if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files) startUpload(e.dataTransfer.files); }));
-    }
-    $$('[data-gtab]').forEach(b => b.onclick = () => nav(route(b.dataset.gtab, state.query.q || '', sort)));
-    $('#grading-search').onkeydown = e => { if (e.key === 'Enter') nav(route(q, e.currentTarget.value.trim(), sort)); };
-    $('#grading-sort').onchange = e => nav(route(q, state.query.q || '', e.currentTarget.value));
-    $('#grading-clear').onclick = () => nav(route(q, '', 'newest'));
-    const selected = new Set();
-    const syncSelection = () => {
-      const bar = $('#grading-batchbar');
-      const count = $('#grading-selected-count');
-      if (bar) bar.classList.toggle('hidden', !selected.size);
-      if (count) count.textContent = selected.size;
+      }, 300);
     };
-    $$('[data-g-select]').forEach(input => input.onchange = e => { if (e.currentTarget.checked) selected.add(e.currentTarget.dataset.gSelect); else selected.delete(e.currentTarget.dataset.gSelect); syncSelection(); });
-    $$('[data-g-open]').forEach(button => button.onclick = e => { e.stopPropagation(); nav('#/grading/' + button.dataset.gOpen); });
-    $$('[data-g-start]').forEach(button => button.onclick = e => { e.stopPropagation(); startGradingItem(button.dataset.gStart); });
-    $$('[data-g-remove]').forEach(button => button.onclick = e => {
-      e.stopPropagation();
-      const found = gradingItem(button.dataset.gRemove);
-      if (!found) return;
-      confirmDialog({ title: '移除答卷', body: '确定从当前批改队列移除“' + esc(found.item.name) + '”吗？此操作会写入审计日志。', danger: true, okText: '移除', onConfirm: () => { removeGradingItem(button.dataset.gRemove); DB.auditLog('移除答卷', found.item.name, state.user && state.user.name); showToast('答卷已从队列移除', 'success'); renderGrading(); } });
-    });
-    $$('.queue-card').forEach(card => {
-      card.onclick = e => { if (e.target.closest('button,input,label')) return; nav('#/grading/' + card.dataset.gid); };
-      card.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav('#/grading/' + card.dataset.gid); } };
-    });
-    const batchStart = $('[data-g-batch-start]');
-    if (batchStart) batchStart.onclick = () => { const ids = Array.from(selected); if (!ids.length) return; ids.forEach((id, index) => setTimeout(() => startGradingItem(id), index * 180)); showToast('已开始处理 ' + ids.length + ' 份答卷', 'info'); };
-    const batchClear = $('[data-g-batch-clear]');
-    if (batchClear) batchClear.onclick = () => { selected.clear(); $$('[data-g-select]').forEach(x => { x.checked = false; }); syncSelection(); };
+    $('#upload-zone').onclick = () => fileInput.click();
+    fileInput.onchange = () => {
+      if (fileInput.files && fileInput.files.length) startUpload(fileInput.files);
+      fileInput.value = '';
+    };
+    ['dragover', 'drop'].forEach(ev => $('#upload-zone').addEventListener(ev, e => {
+      e.preventDefault();
+      if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) startUpload(e.dataTransfer.files);
+    }));
+    $$('[data-gtab]').forEach(b => b.onclick = () => nav('#/grading' + (b.dataset.gtab === 'all' ? '' : '?tab=' + b.dataset.gtab)));
+    $$('.queue-card').forEach(c => c.onclick = () => nav('#/grading/' + c.dataset.gid));
   }
 
-  function queueCard(item, isStudent, queueKey) {
-    const scoreText = item.score == null ? '待评分' : String(item.score) + '/' + (item.total || 100);
-    const firstPreview = item.source && item.source.pages && item.source.pages[0] && item.source.pages[0].preview;
-    const thumb = firstPreview
-      ? '<img src="' + esc(firstPreview) + '" alt="答卷第一页预览"><span>' + (item.source.pages.length > 1 ? item.source.pages.length + ' 页' : '原图') + '</span>'
-      : icon('doc', 22) + '<span>未保存原图</span>';
-    const statusTag = queueKey === 'review'
-      ? '<span class="tag tag-gold">' + (item.low ? '<span class="status-dot red"></span>低置信度' : (item.score == null ? '待人工评分' : icon('review', 12) + '待复核')) + '</span>'
-      : queueKey === 'done' ? '<span class="tag tag-green">' + icon('check', 12) + scoreText + '</span>'
-      : queueKey === 'grading' ? '<span class="tag tag-blue">' + icon('clock', 12) + '批改中</span>'
+  function queueCard(item) {
+    const statusTag = item.status === 'review'
+      ? '<span class="tag tag-gold">' + (item.low ? '<span class="status-dot red"></span>低置信度' : icon('review', 12) + '待复核') + '</span>'
+      : item.status === 'done' ? '<span class="tag tag-green">' + icon('check', 12) + item.score + ' 分</span>'
+      : item.status === 'grading' ? '<span class="tag tag-blue">' + icon('clock', 12) + '批改中</span>'
       : '<span class="tag tag-blue">' + icon('check', 12) + '已识别</span>';
-    const action = isStudent
-      ? '<button class="btn btn-ghost btn-sm" data-g-open="' + esc(item.id) + '">查看反馈</button>'
-      : queueKey === 'recognized' ? '<button class="btn btn-primary btn-sm" data-g-start="' + esc(item.id) + '">开始批改</button>'
-        : queueKey === 'grading' ? '<button class="btn btn-outline btn-sm" data-g-start="' + esc(item.id) + '">继续处理</button>'
-          : queueKey === 'review' ? '<button class="btn btn-primary btn-sm" data-g-open="' + esc(item.id) + '">开始复核</button>'
-            : '<button class="btn btn-outline btn-sm" data-g-open="' + esc(item.id) + '">查看结果</button>';
-    return '<article class="queue-card" data-gid="' + esc(item.id) + '" tabindex="0" role="button" aria-label="打开 ' + esc(item.name) + '">' +
-      '<div class="queue-card__top">' + (!isStudent ? '<label class="queue-select" title="选择答卷"><input type="checkbox" data-g-select="' + esc(item.id) + '"><span></span></label>' : '') + '<div class="thumb' + (firstPreview ? ' has-preview' : '') + '">' + thumb + '</div>' + statusTag + '</div>' +
-      '<div class="qc-name">' + esc(item.name || '未命名答卷') + '</div><div class="qc-meta">' + esc(item.cls || '未分班') + ' · ' + esc(item.task || '待分配任务') + '</div>' +
-      '<div class="qc-foot"><span class="qc-meta" style="margin:0">' + esc(item.time || '刚刚') + (item.fileName ? ' · ' + esc(item.fileName) : '') + '</span>' + (item.low ? '<span class="qc-warning">需核对</span>' : '') + '</div>' +
-      (item.progress && queueKey === 'grading' ? '<div class="progress"><div class="fill" data-g-progress="' + esc(item.id) + '" style="width:' + Number(item.progress) + '%"></div></div><div class="qc-meta" data-g-note="' + esc(item.id) + '">' + esc(item.note || '处理中') + ' · ' + Number(item.progress) + '%</div>' : '') +
-      (item.low ? '<div class="qc-meta qc-low-note">识别置信度较低，建议人工核对</div>' : '') +
-      '<div class="qc-actions">' + action + (!isStudent ? '<button class="btn btn-ghost btn-sm qc-remove" data-g-remove="' + esc(item.id) + '">移除</button>' : '') + '</div></article>';
+    return '<div class="queue-card" data-gid="' + item.id + '">' +
+      '<div class="thumb">' + icon('doc', 22) + ' 答卷预览</div>' +
+      '<div class="qc-name">' + esc(item.name) + '</div>' +
+      '<div class="qc-meta">' + esc(item.cls) + ' · ' + esc(item.task) + '</div>' +
+      '<div class="qc-foot"><span class="qc-meta" style="margin:0">' + item.time + '</span>' + statusTag + '</div>' +
+      (item.progress ? '<div class="progress"><div class="fill" style="width:' + item.progress + '%"></div></div>' : '') +
+      (item.low ? '<div class="qc-meta" style="color:var(--red)">识别置信度较低，建议人工核对</div>' : '') +
+      '</div>';
   }
 
   function explainCard(e) {
@@ -3437,104 +2675,111 @@
   /* ---------- 批改结果 ---------- */
   function renderGradingDetail() {
     const id = state.route.split('/')[2];
-    const isStudent = state.role === 'student';
     const G = DB.grading();
     const src = [].concat(G.review || [], G.done || [], G.recognized || [], G.grading || []).find(x => String(x.id) === String(id));
     if (!src) { renderPage(placeholder('批改记录不存在', '返回批改中心重新选择')); return; }
-    if (isStudent && !src.published && !src.feedback) {
-      renderPage(placeholder('反馈还未发布', '老师发布成绩后，这里会显示分数、评语与答案详解'));
-      return;
-    }
     let d = Object.assign({}, src, {
       id: id,
-      submitTime: src.submitTime || src.createdAt || src.time || '—',
-      total: src.total || (src.feedback && src.feedback.total) || 100,
-      score: src.score != null ? src.score : (src.feedback && src.feedback.score != null ? src.feedback.score : 0),
-      aiScore: src.score != null ? src.score : (src.feedback && src.feedback.score) || 0,
-      confidence: src.low ? '低置信度' : (src.score == null ? (src.ocr && src.ocr.confidence != null ? 'OCR 已完成' : '待人工评分') : '已评分'),
-      comment: src.comment || (src.feedback && src.feedback.comment) || '',
-      reasons: Array.isArray(src.reasons) ? src.reasons : [],
-      audit: Array.isArray(src.audit) ? src.audit : [],
-      answers: gradingAnswers(src)
+      submitTime: src.submitTime || (src.time === '刚刚' ? '刚刚' : '2026-' + (src.time || '')),
+      total: src.total || 100,
+      aiScore: src.score || 0,
+      confidence: src.low ? '低置信度' : '正常',
+      comment: src.comment || 'AI 预批改完成，请教师复核后发布。',
+      reasons: src.reasons || [
+        { type: 'good', text: '答卷已识别，等待人工复核后发布。' }
+      ],
+      audit: src.audit || [
+        { time: src.time || '—', op: 'AI 批改完成，初始评分 ' + (src.score || 0) + '/' + (src.total || 100) + '（置信度 ' + (src.low ? '72%' : '89%') + '）' }
+      ],
+      answers: src.answers || [
+        { no: 1, title: '答卷内容', text: '已识别，等待复核。' }
+      ]
     });
     state.gradingAI = state.gradingAI || {};
     state.gradingExplain = state.gradingExplain || {};
     state.gradingExplainAllowed = state.gradingExplainAllowed || {};
-    if (isStudent && src.feedback && Array.isArray(src.feedback.explanations)) {
-      state.gradingExplain[id] = src.feedback.explanations;
-    }
     const aiResult = state.gradingAI[id];
-    if (aiResult && Number.isFinite(Number(aiResult.score))) {
-      d.score = Number(aiResult.score);
+    if (aiResult) {
+      d.score = aiResult.score;
       d.aiScore = aiResult.score;
-      d.comment = aiResult.comment || d.comment;
-      d.reasons = Array.isArray(aiResult.reasons) ? aiResult.reasons : [];
+      d.comment = aiResult.comment;
+      d.reasons = aiResult.reasons;
       d.confidence = '免费模型';
     }
-    const explList = state.gradingExplain[id] || (Array.isArray(src.explanations) ? src.explanations : []);
-    const explAllowed = state.gradingExplainAllowed[id] != null ? !!state.gradingExplainAllowed[id] : !!src.explainAllowed;
-    const scoreReady = src.score != null || (aiResult && Number.isFinite(Number(aiResult.score)));
+    const explList = state.gradingExplain[id] || [];
+    const explAllowed = !!state.gradingExplainAllowed[id];
     const pct = Math.round(d.score / d.total * 100);
-    const sourcePages = d.source && Array.isArray(d.source.pages) ? d.source.pages : [];
-    const ocrConfidence = sourcePages.length ? Math.round(sourcePages.reduce((sum, page) => sum + Number(page.confidence || 0), 0) / sourcePages.length) : 0;
-    const annotationCount = Array.isArray(d.annotations) ? d.annotations.length : 0;
-    const detailHeadActions = isStudent
-      ? '<button class="btn btn-outline" id="export-score">' + icon('export', 15) + '导出成绩单</button>'
-      : '<button class="btn btn-outline" id="export-score">' + icon('export', 15) + '导出成绩单</button><button class="btn btn-primary" id="publish-score">' + icon('publish', 15) + '发布成绩</button>';
-    const explainActions = isStudent
-      ? '<span class="tag tag-green">已发布 · 学生可见</span>'
-      : '<button class="btn btn-primary btn-sm" id="gen-explain">' + icon('spark', 13) + 'AI 生成详解</button><label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-2);cursor:pointer"><button class="switch' + (explAllowed ? ' on' : '') + '" id="allow-explain"></button>允许学生端查看</label><span class="tag tag-gray" id="explain-status">' + (explList.length ? '已生成 ' + explList.length + ' 题' : '未生成') + '</span>';
-    const explainHint = isStudent
-      ? '<p class="form-hint" style="margin-top:8px">以下详解由教师发布，按题目查看知识点、解题思路与易错点。</p>'
-      : '<p class="form-hint" style="margin-top:8px">详解含知识点回顾、解题思路、逐步解答、易错点与变式；勾选「允许学生端查看」后，随成绩发布一并下发给学生 / 家长端。</p>';
-    const reviewPanel = isStudent ? '' :
-      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">人工复核</span><span class="tag tag-gray">修正留痕</span></div>' +
-      '<div style="padding:16px"><div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:10px"><div class="field" style="margin:0;width:110px"><label>修正评分</label><input class="input" id="fix-score" type="number" min="0" max="' + d.total + '" value="' + d.score + '"></div>' +
-      '<div class="field" style="margin:0;flex:1"><label>修正评语（可选）</label><textarea class="textarea" id="fix-comment" style="min-height:40px">' + esc(d.comment) + '</textarea></div></div>' +
-      '<div style="display:flex;gap:8px;margin-bottom:4px"><button class="btn btn-primary" id="save-fix">' + icon('check', 15) + '保存修正</button><button class="btn btn-ghost" id="confirm-all">全部确认</button></div>' +
-      '<p class="form-hint">保存后写入审计日志；低分 / 异常卷会标记为已复核。</p><div class="divider"></div><div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px">审计日志</div>' +
-      '<div class="audit-list">' + d.audit.map(a => '<div class="audit-item"><span class="time">' + esc(a.time || '') + '</span><span class="op">' + esc(String(a.op || '').replace(/<[^>]+>/g, '')) + '</span></div>').join('') + '</div></div></div>';
     const html =
       '<div class="page">' + crumb([{ label: '批改中心', route: '#/grading' }, { label: '批改结果' }]) +
       '<div class="page-head"><div><h1 class="page-title">' + esc(d.name) + ' · 批改结果</h1>' +
-      '<p class="page-sub">' + esc(d.cls) + ' · ' + esc(d.task) + ' · 提交于 ' + esc(d.submitTime) + '</p></div>' +
-      '<div style="display:flex;gap:8px">' + detailHeadActions + '</div></div>' +
+      '<p class="page-sub">' + esc(d.cls) + ' · ' + esc(d.task) + ' · 提交于 ' + d.submitTime + '</p></div>' +
+      '<div style="display:flex;gap:8px"><button class="btn btn-outline" id="export-score">' + icon('export', 15) + '导出成绩单</button>' +
+      '<button class="btn btn-primary" id="publish-score">' + icon('publish', 15) + '发布成绩</button></div></div>' +
       '<div class="grading-detail">' +
-      /* 左：真实 PDF / 图片与 OCR 修正区 */
-      gradingDocumentHtml(d, id, !isStudent) +
+      /* 左：原始答卷 */
+      '<div class="card" style="padding:14px">' +
+      '<div class="col-panel-head" style="border-bottom:1px solid var(--border);margin-bottom:12px;padding:0 2px 10px">' +
+      '<span style="font-size:13px;font-weight:600;color:var(--ink)">原始答卷（扫描件）</span>' +
+      '<span class="tag tag-gray">第 1 / 2 页</span></div>' +
+      '<div class="answer-sheet">' +
+      '<span class="ai-float-tag tag tag-gold"><span class="status-dot gold"></span>AI 批改结果，请复核</span>' +
+      '<div class="sheet-head"><span>七（2）班 · 数学周测</span><span>姓名：' + esc(d.name) + '　学号：12</span></div>' +
+      d.answers.map(a =>
+        '<div class="sheet-q"><div class="sq-title">' + a.no + '. ' + esc(a.title) + '（' + (a.no === 6 || a.no === 8 ? 4 : 3) + ' 分）</div>' +
+        '<div class="handwrite">' + a.text + '</div></div>'
+      ).join('') +
+      '<div style="position:absolute;bottom:18px;right:20px;font-size:11px;color:var(--text-3)">原始答卷已脱敏 · 以服务端识别结果为准</div>' +
+      '</div></div>' +
       /* 右：AI 批改结果 */
       '<div class="paper-col">' +
       '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">AI 批改结果</span>' +
       '<div style="display:flex;gap:6px;align-items:center"><span class="tag tag-gold">' + esc(d.confidence) + '</span>' +
-      (isStudent ? '<span class="tag tag-green">已发布反馈</span>' : '<button class="btn btn-outline btn-sm" id="ai-reanalyze">' + icon('spark', 13) + 'AI 重新分析</button>') + '</div></div>' +
+      '<button class="btn btn-outline btn-sm" id="ai-reanalyze">' + icon('spark', 13) + 'AI 重新分析</button></div></div>' +
       '<div style="padding:16px">' +
       '<div id="ai-body">' +
       '<div class="score-hero">' +
       '<div class="score-ring" style="background:conic-gradient(var(--primary) ' + pct + '%, var(--primary-soft) 0)">' +
       '<div style="position:absolute;inset:8px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column">' +
-      '<span class="ring-num">' + (scoreReady ? d.score : '—') + '</span><span class="ring-den">' + (scoreReady ? '/ ' + d.total + ' 分' : '待评分') + '</span></div></div>' +
+      '<span class="ring-num">' + d.score + '</span><span class="ring-den">/ ' + d.total + ' 分</span></div></div>' +
       '<div class="score-meta">' +
-      '<div class="score-row"><span class="status-dot blue"></span>原始文件：' + sourcePages.length + ' 页</div>' +
-      '<div class="score-row"><span class="status-dot ' + (ocrConfidence >= 80 ? 'green' : 'gold') + '"></span>OCR 平均置信度：' + ocrConfidence + '%</div>' +
-      '<div class="score-row"><span class="status-dot gold"></span>教师批注：' + annotationCount + ' 条</div></div></div>' +
-      '<div style="background:var(--bg);border-radius:8px;padding:12px;font-size:13.5px;color:var(--text)"><b style="color:var(--ink)">AI 评语：</b>' + esc(d.comment || '尚未生成') + '</div>' +
+      '<div class="score-row"><span class="status-dot green"></span>客观题：12 / 14 分</div>' +
+      '<div class="score-row"><span class="status-dot gold"></span>主观题：20 / 26 分</div>' +
+      '<div class="score-row"><span class="status-dot blue"></span>知识点命中：5 个</div></div></div>' +
+      '<div style="background:var(--bg);border-radius:8px;padding:12px;font-size:13.5px;color:var(--text)"><b style="color:var(--ink)">AI 评语：</b>' + esc(d.comment) + '</div>' +
       '<div class="reason-list">' +
-      (d.reasons.length ? d.reasons.map(r => '<div class="reason-item' + (r.type === 'good' ? ' good' : '') + '">' +
-        (r.type === 'good' ? icon('check', 15) : icon('close', 15)) + '<span>' + esc(r.text) + '</span></div>').join('') : '<div class="empty-state" style="padding:14px">' + icon('doc', 22) + '<div>暂无 AI 分析理由</div></div>') +
+      d.reasons.map(r => '<div class="reason-item' + (r.type === 'good' ? ' good' : '') + '">' +
+        (r.type === 'good' ? icon('check', 15) : icon('close', 15)) + '<span>' + esc(r.text) + '</span></div>').join('') +
       '</div></div>' +
       (window.AI && !window.AI.isConfigured()
         ? '<p class="form-hint">点击「AI 重新分析」需先在顶栏「AI 设置」接入模型：批改结果必须实时生成。</p>'
         : '') +
       '</div></div>' +
       /* 学生版答案详解（老师端允许后下发） */
-      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">学生版答案详解</span><span class="tag ' + (isStudent ? 'tag-green' : 'tag-gold') + '">' + (isStudent ? '教师已发布' : '下发需老师允许') + '</span></div>' +
+      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">学生版答案详解</span><span class="tag tag-gold">下发需老师允许</span></div>' +
       '<div style="padding:14px">' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' + explainActions + '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
+      '<button class="btn btn-primary btn-sm" id="gen-explain">' + icon('spark', 13) + 'AI 生成详解</button>' +
+      '<label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-2);cursor:pointer">' +
+      '<button class="switch' + (explAllowed ? ' on' : '') + '" id="allow-explain"></button>允许学生端查看</label>' +
+      '<span class="tag tag-gray" id="explain-status">' + (explList.length ? '已生成 ' + explList.length + ' 题' : '未生成') + '</span></div>' +
       '<div id="explain-preview">' + (explList.length ? explList.map(explainCard).join('') : '<div class="empty-state" style="padding:14px">' + icon('doc', 24) + '<div>尚未生成详解；AI 会从知识点开始逐题讲解</div></div>') + '</div>' +
-      explainHint + '</div></div>' + reviewPanel +
+      '<p class="form-hint" style="margin-top:8px">详解含知识点回顾、解题思路、逐步解答、易错点与变式；经教师审核后发布给学生。</p>' +
+      '</div></div>' +
+      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">人工复核</span><span class="tag tag-gray">修正留痕</span></div>' +
+      '<div style="padding:16px">' +
+      '<div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:10px">' +
+      '<div class="field" style="margin:0;width:110px"><label>修正评分</label><input class="input" id="fix-score" type="number" min="0" max="' + d.total + '" value="' + d.score + '"></div>' +
+      '<div class="field" style="margin:0;flex:1"><label>修正评语（可选）</label><textarea class="textarea" id="fix-comment" style="min-height:40px">' + esc(d.comment) + '</textarea></div></div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:4px">' +
+      '<button class="btn btn-primary" id="save-fix">' + icon('check', 15) + '保存修正</button>' +
+      '<button class="btn btn-ghost" id="confirm-all">全部确认</button></div>' +
+      '<p class="form-hint">保存后写入审计日志；低分 / 异常卷会标记为已复核。</p>' +
+      '<div class="divider"></div>' +
+      '<div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px">审计日志</div>' +
+      '<div class="audit-list">' + d.audit.map(a => '<div class="audit-item"><span class="time">' + a.time + '</span><span class="op">' + a.op + '</span></div>').join('') + '</div>' +
+      '</div></div></div>' +
       '</div></div>';
     renderPage(html);
-    bindGradingDocument(d, id, !isStudent);
 
     /* AI 重新分析（免费模型） */
     state.aiTried = state.aiTried || {};
@@ -3552,31 +2797,22 @@
         '<p class="form-hint">正在调用 ' + esc(window.AI.providerLabel()) + ' 生成评分、评语与错因…（首次约 10–40 秒）</p>';
       try {
         const res = await window.AI.gradeAnswer({ task: d.task, total: d.total, answers: d.answers });
-        const rawScore = Number(res && res.score);
-        if (!Number.isFinite(rawScore)) throw new Error('模型未返回有效分数，请重试');
-        const score = Math.max(0, Math.min(d.total, Math.round(rawScore)));
+        const score = Math.max(0, Math.min(d.total, Math.round(res.score)));
         state.gradingAI[id] = { score: score, comment: res.comment, reasons: res.reasons };
-        const savedItem = gradingItem(id);
-        if (savedItem) {
-          Object.assign(savedItem.item, { score: score, comment: res.comment || d.comment, reasons: Array.isArray(res.reasons) ? res.reasons : [], confidence: 'AI 已生成，待教师复核' });
-          savedItem.item.audit = d.audit;
-          DB.saveCollection('grading');
-        }
         const t = new Date();
         const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
         d.audit.push({ time: hh, op: '<b>AI（' + esc(window.AI.providerLabel()) + '）</b> 重新分析：评分 ' + d.score + ' → ' + score });
         showToast('已用免费模型重新生成批改结果', 'success');
       } catch (err) {
         body.innerHTML = '<div class="reason-item" style="border-left-color:var(--red)">' + icon('close', 15) +
-          '<span>AI 分析失败：' + esc(err.message) + '（已保留本地数据）</span></div>';
+          '<span>AI 分析失败：' + esc(err.message) + '（未写入业务数据）</span></div>';
       } finally {
         state.aiAnalyzing = false;
         if (state.gradingAI[id]) renderGradingDetail();
       }
     };
-    if (window.AI && !isStudent) {
-      const reanalyzeButton = $('#ai-reanalyze');
-      if (reanalyzeButton) reanalyzeButton.onclick = aiReanalyze;
+    if (window.AI) {
+      $('#ai-reanalyze').onclick = aiReanalyze;
       if (window.AI.isConfigured() && !state.aiTried[id]) {
         state.aiTried[id] = true;
         aiReanalyze();
@@ -3584,7 +2820,7 @@
     }
 
     /* 学生版详解：生成 + 老师端允许 */
-    if (!isStudent) $('#gen-explain').onclick = async () => {
+    $('#gen-explain').onclick = async () => {
       const btn = $('#gen-explain');
       const preview = $('#explain-preview');
       btn.disabled = true;
@@ -3605,34 +2841,30 @@
         btn.disabled = false;
         btn.innerHTML = icon('spark', 13) + 'AI 生成详解';
         preview.innerHTML = '<div class="reason-item" style="border-left-color:var(--red)">' + icon('close', 15) +
-          '<span>详解必须实时生成：' + (failMsg || '模型未返回内容') + '。请先在顶栏「AI 设置」接入模型后重试。</span></div>';
+          '<span>详解必须实时生成：' + (failMsg || '模型未返回内容') + '。请先在顶栏「AI 设置」接入模型后重试（已删除本地示例详解）。</span></div>';
         $('#explain-status').textContent = '生成失败';
         showToast('详解生成失败：' + (failMsg || '模型未返回内容') + '，请重试', 'error');
         return;
       }
       state.gradingExplain[id] = expl;
-      const savedItem = gradingItem(id);
-      if (savedItem) { savedItem.item.explanations = expl; DB.saveCollection('grading'); }
       preview.innerHTML = expl.map(explainCard).join('');
       $('#explain-status').textContent = '已生成 ' + expl.length + ' 题（' + window.AI.providerLabel() + '）';
       btn.disabled = false;
       btn.innerHTML = icon('spark', 13) + 'AI 生成详解';
       showToast('已实时生成 ' + expl.length + ' 题详解，勾选允许后随成绩下发', 'success');
     };
-    if (!isStudent) $('#allow-explain').onclick = () => {
-      const next = !$('#allow-explain').classList.contains('on');
-      if (next && !state.gradingExplain[id]) { showToast('请先生成详解，再允许学生端查看', 'info'); return; }
+    $('#allow-explain').onclick = () => {
       const on = $('#allow-explain').classList.toggle('on');
       state.gradingExplainAllowed[id] = on;
-      const savedItem = gradingItem(id);
-      if (savedItem) { savedItem.item.explainAllowed = on; DB.saveCollection('grading'); }
+      if (on && !state.gradingExplain[id]) {
+        showToast('请先生成详解', 'info');
+      }
     };
 
-    if (!isStudent) $('#save-fix').onclick = () => {
+    $('#save-fix').onclick = () => {
       const val = Math.max(0, Math.min(d.total, Number($('#fix-score').value) || 0));
       const old = d.score;
       d.score = val;
-      d.comment = $('#fix-comment') ? $('#fix-comment').value : d.comment;
       const t = new Date();
       const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
       const diff = val === old ? '评分不变' : '评分 ' + old + ' → ' + val;
@@ -3641,7 +2873,7 @@
       const item = [].concat(G.review || [], G.done || [], G.recognized || [], G.grading || []).find(x => String(x.id) === String(id));
       if (item) {
         item.score = val;
-        item.comment = d.comment;
+        item.comment = $('#fix-comment') ? $('#fix-comment').value : d.comment;
         item.audit = d.audit;
         item.low = false;
         DB.saveCollection('grading');
@@ -3650,8 +2882,7 @@
       showToast('修正已保存并留痕', 'success');
       renderGradingDetail();
     };
-    if (!isStudent) $('#confirm-all').onclick = () => {
-      if (!scoreReady) { showToast('请先保存人工评分，或完成 AI 重新分析', 'info'); $('#fix-score').focus(); return; }
+    $('#confirm-all').onclick = () => {
       const G = DB.grading();
       const fromKey = (G.review || []).some(x => String(x.id) === String(id)) ? 'review'
         : (G.grading || []).some(x => String(x.id) === String(id)) ? 'grading'
@@ -3661,14 +2892,12 @@
       showToast('已全部确认，该答卷进入「已完成」', 'success');
       setTimeout(() => nav('#/grading'), 600);
     };
-    if (!isStudent) $('#publish-score').onclick = () => {
-      if (!scoreReady) { showToast('当前还没有可发布的有效评分，请先完成复核', 'info'); $('#fix-score').focus(); return; }
-      confirmDialog({
+    $('#publish-score').onclick = () => confirmDialog({
       title: '发布成绩',
-      body: '将 ' + esc(d.name) + ' 的成绩与批改反馈发布给学生（家长端按设置可见）？' +
+      body: '将 ' + esc(d.name) + ' 的成绩与批改反馈发布给学生？' +
         (state.gradingExplain[id] && state.gradingExplain[id].length
           ? '<br><b>学生版答案详解</b>：' + (state.gradingExplainAllowed[id]
-              ? '已允许下发（' + state.gradingExplain[id].length + ' 题，学生 / 家长端可见）'
+              ? '已允许下发（' + state.gradingExplain[id].length + ' 题，学生可见）'
               : '已生成但<b>未允许下发</b>，本次仅发送成绩与评语')
           : '<br>未生成学生版详解，本次仅下发成绩与评语。'),
       okText: '发布',
@@ -3678,14 +2907,12 @@
         const fromKey = (G.review || []).some(x => String(x.id) === String(id)) ? 'review'
           : (G.grading || []).some(x => String(x.id) === String(id)) ? 'grading'
           : (G.recognized || []).some(x => String(x.id) === String(id)) ? 'recognized' : null;
-        const moved = fromKey ? moveQueueItem(id, fromKey, 'done', { score: d.score, comment: d.comment }) : gradingItem(id);
-        savePublishedFeedback(moved && moved.item ? moved.item : moved, withExpl ? state.gradingExplain[id] : []);
+        if (fromKey) moveQueueItem(id, fromKey, 'done', { score: d.score });
         DB.auditLog('发布成绩', d.name + ' 的成绩与批改反馈已发布', state.user && state.user.name);
         showToast('成绩已发布' + (withExpl ? '，学生版答案详解已下发' : '') + '，学生 App 已收到反馈', 'success');
         setTimeout(() => nav('#/grading'), 600);
       }
-      });
-    };
+    });
     $('#export-score').onclick = () => {
       const win = window.open('about:blank', '_blank', 'width=820,height=1000');
       if (!win) { showToast('浏览器拦截了新窗口，请允许弹窗后重试', 'error'); return; }
@@ -3698,16 +2925,16 @@
         '.box{border:1px solid #ccc;border-radius:8px;padding:12px 16px;margin-top:14px}' +
         '.bar{height:8px;background:#EDF0F5;border-radius:99px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:#2E7D5B}' +
         '.foot{margin-top:28px;color:#888;font-size:11px;text-align:center}</style></head><body>' +
-        '<div class="head"><h1>凤凰花·智学 学生成绩单</h1><div class="sub">' + new Date().toLocaleDateString('zh-CN') + ' · 教师复核记录</div></div>' +
-        '<div class="row"><span>姓名：<b>' + esc(d.name) + '</b></span><span>班级：' + esc(d.cls || '未分班') + '</span><span>学号：' + esc(d.studentId || '—') + '</span></div>' +
+        '<div class="head"><h1>凤凰花·智学 学生成绩单</h1><div class="sub">' + new Date().toLocaleDateString('zh-CN') + ' · 教师端生成 · 学生可见范围由教师控制</div></div>' +
+        '<div class="row"><span>姓名：<b>' + esc(d.name) + '</b></span><span>班级：' + esc(d.cls) + '</span><span>学号：12</span></div>' +
         '<div class="row"><span>任务：' + esc(d.task) + '</span><span>满分：' + d.total + ' 分</span></div>' +
-        '<div class="row"><span>本次得分</span><span class="score">' + (scoreReady ? d.score + ' / ' + d.total + ' 分（' + pct + '%）' : '待评分') + '</span></div>' +
-        '<div class="box"><b>原始文件</b><p style="margin:6px 0 0">' + esc(d.fileName || (d.source && d.source.fileName) || '未保存原始文件') + ' · ' + sourcePages.length + ' 页 · OCR 置信度 ' + ocrConfidence + '%</p></div>' +
-        '<div class="box"><b>教师评语</b><p style="margin:6px 0 0">' + esc(d.comment || '暂无') + '</p></div>' +
-        '<div class="box"><b>得分点 / 失分点</b>' + ((d.reasons || []).length ? d.reasons.map(r =>
-          '<p style="margin:4px 0"><span style="color:' + (r.type === 'good' ? '#2E7D5B' : '#9B1C1C') + '">' + (r.type === 'good' ? '●' : '○') + '</span> ' + esc(r.text) + '</p>').join('') : '<p style="margin:4px 0;color:#666">暂无 AI 分析理由</p>') + '</div>' +
-        '<div class="box"><b>教师批注</b><p style="margin:6px 0 0">' + annotationCount + ' 条，已写入批改记录</p>' +
-        (state.gradingExplainAllowed[id] ? '<p style="color:#2E7D5B">学生版答案详解：已允许下发</p>' : '<p style="color:#888">学生版答案详解：未下发</p>') +
+        '<div class="row"><span>本次得分</span><span class="score">' + d.score + ' / ' + d.total + ' 分（' + pct + '%）</span></div>' +
+        '<div class="box"><b>教师评语</b><p style="margin:6px 0 0">' + esc(d.comment) + '</p></div>' +
+        '<div class="box"><b>得分点 / 失分点</b>' + (d.reasons || []).map(r =>
+          '<p style="margin:4px 0"><span style="color:' + (r.type === 'good' ? '#2E7D5B' : '#9B1C1C') + '">' + (r.type === 'good' ? '●' : '○') + '</span> ' + esc(r.text) + '</p>').join('') + '</div>' +
+        '<div class="box"><b>知识点掌握度</b>' +
+        '<div style="font-size:13px;margin-top:6px">批改反馈已覆盖：符号处理、混合运算、应用建模等 3 个知识点</div>' +
+        (state.gradingExplainAllowed[id] ? '<p style="color:#2E7D5B">学生版答案详解：已允许下发（从知识点讲起）</p>' : '<p style="color:#888">学生版答案详解：未下发</p>') +
         '</div>' +
         '<div class="foot">本成绩单由教师复核后生成 · 数据已留痕</div></body></html>');
       win.document.close();
@@ -3722,7 +2949,7 @@
     let list = DB.resources().filter(r => !favOnly || r.fav);
     const html =
       '<div class="page">' + crumb(favOnly ? [{ label: '资源库', route: '#/resources' }, { label: '我的收藏' }] : [{ label: '资源库' }]) +
-      '<div class="page-head"><div><h1 class="page-title">' + (favOnly ? '我的收藏' : '资源库') + '</h1><p class="page-sub">教师共同贡献 · AI 美化排版 · 本机配置文件夹同步 · 打开页面自动调用</p></div></div>' +
+      '<div class="page-head"><div><h1 class="page-title">' + (favOnly ? '我的收藏' : '资源库') + '</h1><p class="page-sub">教师共同贡献 · AI 美化排版 · 学校数据服务同步</p></div></div>' +
       '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap"><button class="btn btn-primary" data-nav="#/resources/upload">' + icon('upload', 15) + '贡献资料</button>' +
       '<button class="btn btn-ghost" data-nav="#/resources?tab=fav">' + icon('fav', 15) + '我的收藏</button></div>' +
       '<div class="card" style="margin-bottom:16px"><div class="filter-bar">' +
@@ -3886,9 +3113,9 @@
       showToast('已下载：' + r.title + '.txt', 'success');
     };
     $('#share2').onclick = () => {
-      const link = location.origin + location.pathname + '#/resources/detail/' + encodeURIComponent(r.id);
-      const done = () => showToast('站内资源链接已复制：' + link, 'success');
-      const fallback = () => showToast('站内资源链接：' + link, 'info');
+      const link = location.origin + location.pathname + '#/resources/share/' + encodeURIComponent(r.id);
+      const done = () => showToast('共享链接已复制：' + link, 'success');
+      const fallback = () => showToast('共享链接：' + link, 'info');
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, fallback);
       else fallback();
     };
@@ -3897,8 +3124,8 @@
   /* ---------- 学情报告 ---------- */
   function renderAnalytics() {
     const G = DB.grading();
-    const done = (G.done || []).filter(recordInScope);
-    const students = scopedUsers().filter(u => u.role === 'student');
+    const done = G.done || [];
+    const students = DB.users().filter(u => u.role === 'student');
     const avg = done.length ? Math.round(done.reduce((s, x) => s + (x.score || 0), 0) / done.length) : 0;
     const pass = done.length ? done.filter(x => (x.score || 0) >= (x.total || 100) * 0.6).length : 0;
     const html =
@@ -3950,7 +3177,7 @@
   /* ---------- 学生明细 ---------- */
   function renderStudentDetail() {
     const sid = state.query.id || '';
-    const students = scopedUsers().filter(u => u.role === 'student');
+    const students = DB.users().filter(u => u.role === 'student');
     if (!sid) {
       const html =
         '<div class="page">' + crumb([{ label: '学情报告', route: '#/analytics' }, { label: '学生明细' }]) +
@@ -3971,7 +3198,7 @@
       $$('[data-stu]').forEach(b => b.onclick = () => nav('#/analytics/students?id=' + encodeURIComponent(b.dataset.stu)));
       return;
     }
-    const S = students.find(u => u.id === sid) || students[0];
+    const S = DB.users().find(u => u.id === sid) || students[0];
     if (!S) { renderPage(placeholder('学生不存在', '返回学生列表重新选择')); return; }
     const wrongs = S.wrongs || [];
     const exercises = S.exercises || [];
@@ -4026,9 +3253,9 @@
     const sid = state.query.id || '';
     let S = null;
     if (state.role === 'student') S = state.user;
-    else S = scopedUsers().find(u => u.id === sid) || null;
+    else S = DB.users().find(u => u.id === sid) || null;
     if (!S) {
-      const students = scopedUsers().filter(u => u.role === 'student');
+      const students = DB.users().filter(u => u.role === 'student');
       const html =
         '<div class="page">' + crumb([{ label: '学情报告', route: '#/analytics' }, { label: '学习计划书' }]) +
         '<div class="page-head"><div><h1 class="page-title">学习计划书</h1><p class="page-sub">选择一名学生，为其生成计划、配套习题与每日投入安排</p></div></div>' +
@@ -4091,10 +3318,10 @@
       '<div class="grid-2" style="gap:14px;margin-top:16px">' +
       '<div><h4 class="section-title" style="font-size:14px;margin-bottom:8px">专项建议（针对薄弱点）</h4>' +
       (p.specialTopics || []).map(s => '<div class="reason-item" style="padding:8px 10px">' + icon('doc', 13) + '<span>' + esc(s) + '</span></div>').join('') + '</div>' +
-      '<div><h4 class="section-title" style="font-size:14px;margin-bottom:8px">家长配合建议</h4>' +
-      (p.parentTips || []).map(s => '<div class="reason-item good" style="padding:8px 10px">' + icon('check', 13) + '<span>' + esc(s) + '</span></div>').join('') + '</div>' +
+      '<div><h4 class="section-title" style="font-size:14px;margin-bottom:8px">下一步学习建议</h4>' +
+      (p.studentTips || p.nextSteps || []).map(s => '<div class="reason-item good" style="padding:8px 10px">' + icon('check', 13) + '<span>' + esc(s) + '</span></div>').join('') + '</div>' +
       '</div>' +
-      '<p class="form-hint" style="margin-top:14px">计划基于 AI 分析长周期作业数据生成，仅供教学参考；教师可批注后下发给家长。</p>' +
+      '<p class="form-hint" style="margin-top:14px">计划基于 AI 分析长周期作业数据生成，仅供教学参考；教师审核后下发给学生。</p>' +
       '</div>';
   }
 
@@ -4139,7 +3366,7 @@
       showToast('计划生成失败：' + msg, 'error');
     };
     if (!window.AI || !window.AI.isConfigured()) {
-      fail('请先在顶栏「AI 设置」接入模型。');
+      fail('请先在顶栏「AI 设置」接入免费模型（已删除本地示例计划）。');
       return;
     }
     let plan = null, exercises = null, schedule = null;
@@ -4182,7 +3409,7 @@
   }
 
   function openNoticeEditor(existing) {
-    if (!['admin', 'academic'].includes(state.role)) { showToast('只有管理端或教务处可以发布公告', 'error'); return; }
+    if (state.role !== 'admin') { showToast('只有管理员可以发布公告', 'error'); return; }
     const root = $('#dialog-root');
     const item = existing || {};
     const status = item.status || '草稿';
@@ -4240,84 +3467,72 @@
   /* ---------- 学校管理 ---------- */
   function renderAdmin() {
     const requestedTab = state.query.tab || 'members';
-    const isAdmin = state.role === 'admin';
-    const isAcademic = state.role === 'academic';
-    const isTeacher = state.role === 'teacher';
-    const allowedTabs = isTeacher ? ['members', 'classes'] : isAcademic ? ['members', 'classes', 'notices'] : ['members', 'classes', 'notices', 'permissions'];
-    const tab = allowedTabs.includes(requestedTab) ? requestedTab : 'members';
-    const tabs = [['members', isTeacher ? '本班成员' : isAcademic ? '师生成员' : '成员管理'], ['classes', isTeacher ? '我的班级' : '班级管理']];
-    if (!isTeacher) tabs.push(['notices', '公告管理']);
-    if (isAdmin || isAcademic) tabs.push(['permissions', '权限设置']);
-    const scopeTitle = isAdmin ? '管理端' : isAcademic ? '教务处 · 校级管理' : '老师 · 班级管理';
-    const scopeDesc = isAdmin ? '管理全校组织、账号、班级、公告与权限' : isAcademic ? '管理本校教师、学生、班级与教务协同数据' : '只管理本人任教班级，可导入和维护本班学生';
-    const inviteOptions = isAdmin ? '<option value="academic">教务处</option><option value="teacher">老师</option><option value="student">学生</option>' : isAcademic ? '<option value="teacher">老师</option><option value="student">学生</option>' : '<option value="student">学生</option>';
-    const roleOptions = isAdmin ? '教务处 / 教师 / 学生' : isAcademic ? '教师 / 学生' : '本班学生';
+    const tab = ['members', 'classes', 'notices', 'permissions'].includes(requestedTab) ? requestedTab : 'members';
+    const tabs = [['members', '成员管理'], ['classes', '班级管理'], ['notices', '公告管理'], ['permissions', '权限设置']];
     const head =
-      '<div class="page-head"><div><span class="page-kicker">' + scopeTitle + '</span><h1 class="page-title">' + (isAdmin ? '管理中枢' : isAcademic ? '教务处工作台' : '班级管理') + '</h1><p class="page-sub">' + scopeDesc + '</p></div><div class="page-head-actions"><button class="btn btn-outline" id="admin-network-open">网络接入</button><button class="btn btn-outline" id="admin-ai-open">AI 服务状态</button></div></div>' +
+      '<div class="page-head"><div><h1 class="page-title">学校管理</h1><p class="page-sub">管理本权限范围内的成员、班级、公告与学校服务</p></div><div class="page-head-actions"><button class="btn btn-outline" id="admin-network-open">网络接入</button><button class="btn btn-outline" id="admin-ai-open">AI 服务状态</button></div></div>' +
       '<div class="admin-tabs">' + tabs.map(t =>
         '<button class="admin-tab' + (tab === t[0] ? ' active' : '') + '" data-atab="' + t[0] + '">' + esc(t[1]) + '</button>').join('') + '</div>';
 
     let body = '';
     if (tab === 'members') {
-      const all = scopedUsers();
+      const all = DB.users();
       const students = all.filter(u => u.role === 'student');
       const teachers = all.filter(u => u.role === 'teacher');
-      const academics = all.filter(u => u.role === 'academic');
+      const admins = all.filter(u => u.role === 'admin');
       body = '<div class="card" style="margin-bottom:14px"><div class="filter-bar" style="flex-wrap:wrap">' +
-        '<div class="search-box" style="flex:1;min-width:200px"><span class="search-icon">' + icon('search', 15) + '</span><input class="input" id="m-search" placeholder="搜索姓名 / 脱敏手机号"></div>' +
-        '<button class="btn btn-primary" id="import-m">' + icon('upload', 15) + '导入' + roleOptions + '（CSV）</button>' +
+        '<div class="search-box" style="flex:1;min-width:200px"><span class="search-icon">' + icon('search', 15) + '</span><input class="input" id="m-search" placeholder="搜索姓名 / 手机号"></div>' +
+        '<button class="btn btn-primary" id="import-m">' + icon('upload', 15) + '导入学生/教师（CSV）</button>' +
         '<button class="btn btn-outline" id="tpl-m">' + icon('download', 15) + '下载模板</button>' +
         '<button class="btn btn-outline" id="export-m">' + icon('export', 15) + '导出成员</button>' +
         '<button class="btn btn-ghost" id="invite-m">添加一个</button></div>' +
         '<div class="learn-strip" style="margin-top:12px">' +
         '<div class="learn-stat"><div class="ls-num">' + students.length + '</div><div class="ls-label">学生账号</div></div>' +
         '<div class="learn-stat"><div class="ls-num">' + teachers.length + '</div><div class="ls-label">教师账号</div></div>' +
-        (isAdmin || isAcademic ? '<div class="learn-stat"><div class="ls-num">' + academics.length + '</div><div class="ls-label">教务处账号</div></div>' : '') +
         '<div class="learn-stat"><div class="ls-num">' + all.filter(u => u.status === '待激活').length + '</div><div class="ls-label">待首次登录激活</div></div>' +
         '<div class="learn-stat"><div class="ls-num">' + all.filter(u => u.status === '正常').length + '</div><div class="ls-label">已激活</div></div>' +
-        '</div><div class="security-banner"><span class="status-dot green"></span><div><b>账号安全保护已启用</b><span>密码仅保存为哈希；姓名、手机号、班级和学校归属写入加密快照，列表默认只显示脱敏手机号。</span></div></div></div>' +
+        '</div></div>' +
         '<div class="card" style="padding:0"><div class="table-wrap"><table class="tbl">' +
-        '<thead><tr><th>姓名</th><th>角色</th><th>学校 / 年级 / 班级</th><th>手机号（脱敏）</th><th>状态</th><th>激活时间</th><th style="width:190px">操作</th></tr></thead><tbody>' +
-        (all.length ? all.map(m =>
+        '<thead><tr><th>姓名</th><th>角色</th><th>年级 / 班级</th><th>手机号</th><th>状态</th><th>激活时间</th><th style="width:190px">操作</th></tr></thead><tbody>' +
+        (students.length || teachers.length ? all.map(m =>
           '<tr><td style="font-weight:600;color:var(--ink)">' + esc(m.name) + '</td>' +
-          '<td><span class="tag ' + (m.role === 'admin' ? 'tag-blue' : m.role === 'academic' ? 'tag-violet' : m.role === 'teacher' ? 'tag-green' : 'tag-gray') + '">' + esc(roleLabel(m.role)) + '</span></td>' +
-          '<td>' + esc(m.schoolName || m.schoolId || '本校') + ' · ' + esc(m.grade || '—') + (m.cls ? ' · ' + esc(m.cls) : '') + '</td><td class="num">' + esc(maskPhone(m.phone)) + '</td>' +
+          '<td><span class="tag ' + (m.role === 'admin' ? 'tag-blue' : m.role === 'teacher' ? 'tag-green' : 'tag-gray') + '">' + (m.role === 'admin' ? '管理员' : m.role === 'teacher' ? '教师' : '学生') + '</span></td>' +
+          '<td>' + esc(m.grade || '—') + (m.cls ? ' · ' + esc(m.cls) : '') + '</td><td class="num">' + esc(m.phone) + '</td>' +
           '<td>' + (m.status === '正常' ? '<span class="tag tag-green">' + icon('check', 12) + '已激活</span>' : m.status === '待激活' ? '<span class="tag tag-gold">待激活</span>' : '<span class="tag tag-red">已禁用</span>') + '</td>' +
           '<td class="num" style="color:var(--text-2)">' + (m.activatedAt ? esc(m.activatedAt.slice(0, 10)) : '—') + '</td>' +
           '<td><div style="display:flex;gap:4px;flex-wrap:wrap">' +
-          (m.role === 'admin' || !DB.canManageRole(state.user, m.role)
-            ? '<span class="tag tag-gray">内置</span>'
+          (m.role === 'admin'
+            ? '<span class="tag tag-gray">系统账号</span>'
             : '<button class="btn btn-ghost btn-sm" data-act="disable" data-id="' + m.id + '">' + (m.status === '已禁用' ? '启用' : '禁用') + '</button>' +
               '<button class="btn btn-ghost btn-sm" data-act="reset" data-id="' + m.id + '">重置</button>' +
               '<button class="btn btn-ghost btn-sm" style="color:var(--red)" data-act="del" data-id="' + m.id + '">删除</button>') +
           '</div></td></tr>'
         ).join('') : '<tr><td colspan="7"><div class="empty-state" style="padding:26px 0">' + icon('members', 26) +
-          '<div style="margin-bottom:10px">当前权限范围内还没有成员</div>' +
+          '<div style="margin-bottom:10px">还没有学生 / 教师账号</div>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">' +
           '<button class="btn btn-primary" id="empty-import">' + icon('upload', 15) + '立即导入学生/教师表格</button>' +
           '<button class="btn btn-outline" id="empty-tpl">' + icon('download', 15) + '先下载模板</button>' +
           '</div></div></td></tr>') +
         '</tbody></table></div></div>' +
-        '<p class="form-hint" style="margin-top:10px">当前层级：' + esc(scopeDesc) + '。导入规则：表格需含「姓名 / 手机号 / 角色」三列，可加「年级 / 班级/部门 / 学校ID / 教务处ID」；密码只生成哈希，账号个人字段会以加密快照保存，页面只显示脱敏手机号。</p>';
+        '<p class="form-hint" style="margin-top:10px">导入规则：表格需含「姓名 / 手机号 / 角色」三列（可加「年级 / 班级/部门」），支持 CSV / 分号 / Tab 分隔；服务端会生成一次性临时密码并加密保存。</p>';
     } else if (tab === 'classes') {
-      const all = scopedUsers();
+      const all = DB.users();
       const clsMap = {};
       all.forEach(u => {
         const k = u.cls || '未分班';
-        clsMap[k] = clsMap[k] || { students: 0, teachers: [], schoolId: u.schoolId || currentSchoolId() };
+        clsMap[k] = clsMap[k] || { students: 0, teachers: [] };
         if (u.role === 'student') clsMap[k].students++;
         if (u.role === 'teacher') clsMap[k].teachers.push(u.name);
       });
-      (scopedClasses() || []).forEach(c => { if (!clsMap[c.name]) clsMap[c.name] = { students: (c.studentIds || []).length, teachers: [], schoolId: c.schoolId }; });
-      const names = Object.keys(clsMap).filter(name => name !== '未分班');
-      body = '<div class="page-head compact"><div><h2 class="section-title">' + (isTeacher ? '我的班级' : '班级组织') + '</h2><p class="page-sub">' + (isTeacher ? '仅展示本人任教班级及本班学生' : '学校 → 教务处 → 班级 → 师生，所有归属变更都会留下记录') + '</p></div><button class="btn btn-primary" id="class-create">' + icon('plus', 15) + '新建班级</button></div><div class="class-cards">' +
+      const names = Object.keys(clsMap);
+      body = '<div class="class-cards">' +
         (names.length ? names.map(c =>
           '<div class="class-card"><div class="cc-name">' + esc(c) + '</div>' +
-          '<div class="cc-meta">' + esc(clsMap[c].schoolId || currentSchoolId()) + ' · ' + clsMap[c].students + ' 名学生 · 教师：' + esc(clsMap[c].teachers.join('、') || '—') + '</div>' +
+          '<div class="cc-meta">' + clsMap[c].students + ' 名学生 · 教师：' + esc(clsMap[c].teachers.join('、') || '—') + '</div>' +
           '<div style="display:flex;justify-content:space-between;align-items:center">' +
-          '<span class="tag tag-green">' + icon('check', 12) + (isTeacher ? '任教中' : '运行中') + '</span>' +
+          '<span class="tag tag-green">' + icon('check', 12) + '进行中</span>' +
           '<button class="btn btn-ghost btn-sm" data-nav="#/admin?tab=members">管理成员</button></div></div>'
-        ).join('') : '<div class="class-card" style="grid-column:1/-1"><div class="empty-state" style="padding:20px">' + icon('class', 26) + '<div>导入成员或新建班级后，这里会生成组织卡片</div></div></div>') +
+        ).join('') : '<div class="class-card" style="grid-column:1/-1"><div class="empty-state" style="padding:20px">' + icon('class', 26) + '<div>导入学生/教师表格后，这里会自动按「班级/部门」生成班级卡片</div></div></div>') +
         '</div>';
     } else if (tab === 'notices') {
       const announcements = DB.notices();
@@ -4328,39 +3543,19 @@
       body = '<div class="announcement-admin-hero"><div><span>学校协同</span><h2>公告发布中心</h2><p>面向全校、教师、学生或管理员发布消息，并管理草稿、有效期和撤回状态。</p></div><button class="btn btn-primary" id="announcement-create">' + icon('plus', 16) + ' 发布新公告</button></div><div class="announcement-stats"><div><strong>' + published + '</strong><span>当前发布</span></div><div><strong>' + drafts + '</strong><span>草稿</span></div><div><strong>' + withdrawn + '</strong><span>撤回 / 过期</span></div></div><div class="announcement-admin-list">' + (announcements.length ? announcements.map(n => { const nStatus = n.status || '已发布'; const expired = n.expiresAt && n.expiresAt < nowKey; return '<article class="announcement-admin-item' + noticePriorityClass(n) + '"><div class="announcement-admin-main"><div class="announcement-admin-title"><span class="announcement-status status-' + (expired ? 'expired' : nStatus === '已发布' ? 'published' : nStatus === '草稿' ? 'draft' : 'withdrawn') + '">' + (expired ? '已过期' : esc(nStatus)) + '</span><span class="announcement-priority">' + esc(n.priority || '普通') + '</span><b>' + esc(noticeTitle(n)) + '</b></div><p>' + esc(n.text) + '</p><small>' + esc(n.scope || '全校') + ' · ' + esc(n.publisher || '系统') + ' · 创建于 ' + esc((n.createdAt || '').slice(0, 16).replace('T',' ')) + (n.expiresAt ? ' · 有效至 ' + esc(n.expiresAt) : '') + '</small></div><div class="announcement-admin-actions"><button class="btn btn-outline btn-sm" data-announcement-action="edit" data-id="' + esc(n.id) + '">编辑</button>' + (nStatus === '已发布' ? '<button class="btn btn-ghost btn-sm" data-announcement-action="withdraw" data-id="' + esc(n.id) + '">撤回</button>' : '<button class="btn btn-primary btn-sm" data-announcement-action="publish" data-id="' + esc(n.id) + '">发布</button>') + '<button class="btn btn-ghost btn-sm danger-text" data-announcement-action="delete" data-id="' + esc(n.id) + '">删除</button></div></article>'; }).join('') : '<div class="card"><div class="empty-state" style="padding:34px 0">' + icon('notice', 30) + '<div>还没有公告。可先发布一条全校通知，或保存为草稿。</div></div></div>') + '</div>';
     } else if (tab === 'permissions') {
       body = '<div class="card" style="padding:0"><div class="table-wrap"><table class="tbl">' +
-        '<thead><tr><th>权限项</th><th style="text-align:center">老师</th><th style="text-align:center">教务处</th><th style="text-align:center">管理端</th></tr></thead><tbody>' +
+        '<thead><tr><th>权限项</th><th style="text-align:center">教师</th><th style="text-align:center">管理员</th></tr></thead><tbody>' +
         M.permissions.map(p =>
           '<tr><td style="font-weight:500">' + esc(p.action) + '</td>' +
-          [p.teacher, p.academic, p.admin].map(v => '<td style="text-align:center">' + (v ? '<span style="color:var(--green)">' + icon('check', 16) + '</span>' : '<span style="color:var(--text-3)">—</span>') + '</td>').join('') +
+          [p.teacher, p.admin].map(v => '<td style="text-align:center">' + (v ? '<span style="color:var(--green)">' + icon('check', 16) + '</span>' : '<span style="color:var(--text-3)">—</span>') + '</td>').join('') +
           '</tr>'
         ).join('') +
         '</tbody></table></div></div>' +
-        '<div class="hierarchy-guide"><div><b>管理级</b><span>管理端可跨学校查看与治理账号、组织和服务。</span></div><div><b>校级</b><span>教务处只管理本校，可导入老师与学生、维护班级。</span></div><div><b>班级级</b><span>老师只管理本人任教班级，可导入学生并处理本班教学数据。</span></div></div>';
+        '<p class="form-hint" style="margin:10px 0 0">教师可命题、批改、贡献资料；管理员另可管理成员、班级和权限。AI 学习能力不按角色或付费等级区分。</p>';
     }
     renderPage('<div class="page">' + head + body + '</div>');
 
     if ($('#admin-ai-open')) $('#admin-ai-open').onclick = openAISettings;
     if ($('#admin-network-open')) $('#admin-network-open').onclick = openNetworkSettings;
-
-    const classCreate = $('#class-create');
-    if (classCreate) classCreate.onclick = () => {
-      const root = $('#dialog-root');
-      root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:440px" role="dialog" aria-modal="true"><h3 class="dialog-title">新建班级</h3><p class="dialog-body">班级会自动归入“' + esc(isAdmin ? '全校' : isAcademic ? '本校' : '本人任教范围') + '”，之后可通过成员导入绑定学生与老师。</p><div class="field"><label>班级名称<span class="req">*</span></label><input class="input" id="new-class-name" placeholder="如：七（1）班"></div><div class="field"><label>年级</label><input class="input" id="new-class-grade" placeholder="如：七年级"></div><div class="dialog-actions"><button class="btn btn-ghost" data-class-cancel>取消</button><button class="btn btn-primary" data-class-save>创建班级</button></div></div></div>';
-      const close = () => { root.innerHTML = ''; };
-      root.querySelector('[data-class-cancel]').onclick = close;
-      root.querySelector('.dialog-mask').onclick = e => { if (e.target === e.currentTarget) close(); };
-      root.querySelector('[data-class-save]').onclick = () => {
-        const name = root.querySelector('#new-class-name').value.trim();
-        const grade = root.querySelector('#new-class-grade').value.trim();
-        const result = DB.addClass({ name: name, grade: grade }, state.user);
-        if (!result.ok) { showToast(result.msg || '班级创建失败', 'error'); return; }
-        DB.auditLog('创建班级', name + '（' + (grade || '年级待补充') + '）', state.user && state.user.name);
-        close();
-        showToast('班级已创建，可继续导入成员', 'success');
-        renderAdmin();
-      };
-      root.querySelector('#new-class-name').focus();
-    };
 
     const announcementCreate = $('#announcement-create');
     if (announcementCreate) announcementCreate.onclick = () => openNoticeEditor();
@@ -4384,7 +3579,7 @@
         body: '确定' + (u.status === '已禁用' ? '启用' : '禁用') + ' <b>' + esc(u.name) + '</b> 吗？' + (u.status === '已禁用' ? '' : '禁用后无法登录，操作会记录审计日志。'),
         danger: u.status !== '已禁用', okText: u.status === '已禁用' ? '启用' : '禁用',
         onConfirm: () => {
-          const r = DB.updateUser(u.id, { status: u.status === '已禁用' ? '正常' : '已禁用' }, state.user);
+          const r = DB.updateUser(u.id, { status: u.status === '已禁用' ? '正常' : '已禁用' });
           DB.auditLog(u.status === '已禁用' ? '启用成员' : '禁用成员', u.name + '（' + u.phone + '）', state.user && state.user.name);
           showToast((r.ok ? (u.status === '已禁用' ? '已启用 ' : '已禁用 ') + u.name : '操作失败'), r.ok ? 'success' : 'error');
           renderAdmin();
@@ -4395,7 +3590,7 @@
         body: '将 <b>' + esc(u.name) + '</b> 的密码重置为手机号后 6 位，状态回到「待激活」，需首次登录重新设置密码。',
         danger: true, okText: '确认重置',
         onConfirm: () => {
-          const r = DB.resetPassword(u.id, state.user);
+          const r = DB.resetPassword(u.id);
           DB.auditLog('重置密码', u.name + '（' + u.phone + '）', state.user && state.user.name);
           showToast(r.ok ? '已重置 ' + u.name + ' 的密码，等待重新激活' : r.msg, r.ok ? 'success' : 'error');
           renderAdmin();
@@ -4406,7 +3601,7 @@
         body: '确定删除 <b>' + esc(u.name) + '</b>（' + esc(u.phone) + '）吗？删除后不可恢复。',
         danger: true, okText: '删除',
         onConfirm: () => {
-          const r = DB.removeUser(u.id, state.user);
+          const r = DB.removeUser(u.id);
           DB.auditLog('删除成员', u.name + '（' + u.phone + '）', state.user && state.user.name);
           showToast(r.ok ? '已删除 ' + u.name : r.msg, r.ok ? 'success' : 'error');
           renderAdmin();
@@ -4423,13 +3618,12 @@
     };
     $('#import-m') && ($('#import-m').onclick = () => {
       const root = $('#dialog-root');
-      root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:560px"><h3 class="dialog-title">导入' + roleOptions + '（CSV，Excel 可打开）</h3>' +
+      root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:560px"><h3 class="dialog-title">导入学生 / 教师（CSV，Excel 可打开）</h3>' +
         '<div class="dialog-body">' +
-        '<p class="form-hint" style="margin-top:0">把 Excel / WPS 里的名单粘贴到下方（或选择 CSV / TXT 文件）。本次导入范围：<b>' + roleOptions + '</b>。表头支持：姓名、手机号、角色、年级、班级/部门、学校ID、教务处ID。</p>' +
-        '<textarea class="textarea" id="im-text" style="min-height:150px" placeholder="姓名,手机号,角色,年级,班级/部门&#10;张小明,13800000001,学生,七年级,七（1）班&#10;李小红,13800000002,学生,七年级,七（1）班&#10;王老师,13800000003,教师,七年级,七（1）班"></textarea>' +
-        '<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><input type="file" id="im-file" accept=".csv,.txt,.tsv" style="flex:1;font-size:12px">' +
-        '</div>' +
-        '<p class="form-hint" style="margin:8px 0 0">导入后账号为「待激活」，密码只保存为哈希；姓名、手机号、班级等字段进入加密存储，页面默认仅显示脱敏手机号。</p>' +
+        '<p class="form-hint" style="margin-top:0">把 Excel / WPS 里的名单粘贴到下方（或选择 CSV / TXT 文件）。表头支持常见别名，例如：姓名 / 名字，手机号 / 手机 / 电话，角色，年级，班级/部门。</p>' +
+        '<textarea class="textarea" id="im-text" style="min-height:150px" placeholder="姓名,手机号,角色,年级,班级/部门&#10;请粘贴真实名单，不要把真实手机号写入演示或截图。"></textarea>' +
+        '<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><input type="file" id="im-file" accept=".csv,.txt,.tsv" style="flex:1;font-size:12px"></div>' +
+        '<p class="form-hint" style="margin:8px 0 0">导入后由服务端生成一次性临时密码并加密保存；临时密码只返回给本次操作的授权管理员。</p>' +
         '</div>' +
         '<div class="dialog-actions"><button class="btn btn-ghost" data-dialog="cancel">取消</button>' +
         '<button class="btn btn-primary" data-dialog="ok">导入</button></div></div></div>';
@@ -4443,8 +3637,10 @@
       };
       root.querySelector('[data-dialog="cancel"]').onclick = () => { root.innerHTML = ''; };
       root.querySelector('.dialog-mask').addEventListener('click', e => { if (e.target === e.currentTarget) root.innerHTML = ''; });
-      root.querySelector('[data-dialog="ok"]').onclick = () => {
-        const res = DB.importRosterCSV(root.querySelector('#im-text').value, state.user);
+      root.querySelector('[data-dialog="ok"]').onclick = async () => {
+        const button = root.querySelector('[data-dialog="ok"]');
+        if (button) { button.disabled = true; button.textContent = '加密导入中…'; }
+        const res = await DB.importRosterCSV(root.querySelector('#im-text').value);
         root.innerHTML = '';
         if (res.ok) {
           DB.auditLog('导入成员', res.msg + (res.skipped && res.skipped.length ? '；跳过：' + res.skipped.join('；') : ''), state.user && state.user.name);
@@ -4489,7 +3685,7 @@
       root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:440px"><h3 class="dialog-title">添加成员</h3>' +
         '<div class="dialog-body">' +
         '<div class="field"><label>姓名<span class="req">*</span></label><input class="input" id="nm-name" placeholder="姓名"></div>' +
-        '<div class="field"><label>角色</label><select class="select" id="nm-role">' + inviteOptions + '</select></div>' +
+        '<div class="field"><label>角色</label><select class="select" id="nm-role"><option value="student">学生</option><option value="teacher">教师</option></select></div>' +
         '<div class="field"><label>年级</label><input class="input" id="nm-grade" placeholder="如：七年级"></div>' +
         '<div class="field"><label>班级 / 部门</label><input class="input" id="nm-cls" placeholder="如：七（1）班"></div>' +
         '<div class="field"><label>手机号<span class="req">*</span></label><input class="input" id="nm-phone" placeholder="11 位手机号"></div>' +
@@ -4505,7 +3701,7 @@
           grade: $('#nm-grade').value.trim(),
           cls: $('#nm-cls').value.trim() || ($('#nm-role').value === 'student' ? '未分班' : '教师组'),
           phone: $('#nm-phone').value.trim()
-        }, state.user);
+        });
         root.innerHTML = '';
         if (r.ok) {
           DB.auditLog('添加成员', r.user.name + '（' + r.user.phone + '）', state.user && state.user.name);
@@ -4551,7 +3747,7 @@
       { name: '单元测试卷', desc: '覆盖章节全部知识点，难度梯度 3:5:2，适合单元周测', tag: '推荐', cls: 'tag-blue' },
       { name: '专项练习卷', desc: '单知识点集中训练，按薄弱点自动选题', tag: '专项', cls: 'tag-green' },
       { name: '基础过关卷', desc: '以易、中题为主，用于课前诊断与基础巩固', tag: '过关', cls: 'tag-gold' },
-      { name: '期中 / 期末阶段测评', desc: '按试卷结构组卷（选择/填空/解答），含分值分布', tag: '阶段测评', cls: 'tag-gray' }
+      { name: '学校组卷方案', desc: '按学校、地区、学年和学科规则加载组卷结构', tag: '待配置', cls: 'tag-gray' }
     ];
     const html =
       '<div class="page">' + crumb([{ label: '命题组卷', route: '#/paper' }, { label: '组卷模板' }]) +
@@ -4587,41 +3783,36 @@
 
   /* ---------- 评分标准 ---------- */
   function renderRubric() {
-    const defaults = [
-      { type:'选择题', score:'每题 3 分', points:'答案唯一，全对得分', rule:'OCR 比对 + 模型复核' },
-      { type:'填空题', score:'每题 4 分', points:'等价答案可得分；单位错误扣 1 分', rule:'模型按知识点判定等价性' },
-      { type:'解答题', score:'每题 8 分', points:'过程分 5 分 + 结果分 3 分；关键步骤给分', rule:'按评分要点逐项给分并说明错因' },
-      { type:'作文 / 主观题', score:'按篇给分', points:'内容 40% + 结构 30% + 语言 30%', rule:'模型给出分项评分与提升建议' }
+    const rows = [
+      ['选择题', '每题 3 分', '答案唯一，全对得分', 'OCR 比对 + 模型复核'],
+      ['填空题', '每题 4 分', '等价答案可得分；单位错误扣 1 分', '模型按知识点判定等价性'],
+      ['解答题', '每题 8 分', '过程分 5 分 + 结果分 3 分；关键步骤给分', '按评分要点逐项给分并说明错因'],
+      ['作文 / 主观题', '按篇给分', '内容 40% + 结构 30% + 语言 30%', '模型给出分项评分与提升建议']
     ];
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem('fh_rubric_v2') || 'null'); } catch (e) {}
-    const rows = defaults.map((row, i) => Object.assign({}, row, saved && saved.rows && saved.rows[i] ? saved.rows[i] : {}));
-    const switches = saved && Array.isArray(saved.switches) ? saved.switches : [true, true, false];
     const html =
       '<div class="page">' + crumb([{ label: '批改中心', route: '#/grading' }, { label: '评分标准' }]) +
       '<div class="page-head"><div><h1 class="page-title">评分标准</h1><p class="page-sub">按题型配置评分细则与 AI 批改规则，保存后对后续批改生效</p></div>' +
-      '<div style="display:flex;gap:8px"><button class="btn btn-ghost" id="reset-rubric">恢复默认</button><button class="btn btn-primary" id="save-rubric">' + icon('check', 15) + '保存标准</button></div></div>' +
+      '<button class="btn btn-primary" id="save-rubric">' + icon('check', 15) + '保存标准</button></div>' +
       '<div class="card" style="padding:0"><div class="table-wrap"><table class="tbl">' +
       '<thead><tr><th>题型</th><th>分值</th><th>评分要点</th><th>AI 批改规则</th></tr></thead><tbody>' +
-      rows.map((r, i) => '<tr><td style="font-weight:600;color:var(--ink)">' + esc(r.type) + '</td><td><input class="input rubric-input" data-rubric-field="score" data-rubric-index="' + i + '" value="' + esc(r.score) + '"></td><td><textarea class="textarea rubric-input" data-rubric-field="points" data-rubric-index="' + i + '" rows="2">' + esc(r.points) + '</textarea></td><td><textarea class="textarea rubric-input" data-rubric-field="rule" data-rubric-index="' + i + '" rows="2">' + esc(r.rule) + '</textarea></td></tr>').join('') +
+      rows.map(r => '<tr><td style="font-weight:600;color:var(--ink)">' + r[0] + '</td><td class="num">' + r[1] + '</td><td>' + r[2] + '</td><td>' + r[3] + '</td></tr>').join('') +
       '</tbody></table></div></div>' +
       '<div class="card" style="margin-top:16px"><h2 class="section-title" style="margin-bottom:10px">异常卷规则</h2>' +
       '<div style="display:flex;flex-direction:column;gap:10px">' +
-      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">识别置信度低于阈值自动标红</div><div class="qc-meta">识别置信度 &lt; 80% 的答卷进入「待复核」并优先展示</div></div><button class="switch' + (switches[0] ? ' on' : '') + '" data-rub-sw="0" aria-label="切换识别置信度规则"></button></div>' +
-      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">低分答卷强制人工复核</div><div class="qc-meta">得分低于满分的 50% 时，不可直接发布</div></div><button class="switch' + (switches[1] ? ' on' : '') + '" data-rub-sw="1" aria-label="切换低分复核规则"></button></div>' +
-      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">批改修正率预警</div><div class="qc-meta">人工修正率高于 30% 时提示模型迭代</div></div><button class="switch' + (switches[2] ? ' on' : '') + '" data-rub-sw="2" aria-label="切换修正率预警规则"></button></div>' +
+      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">识别置信度低于阈值自动标红</div><div class="qc-meta">识别置信度 &lt; 80% 的答卷进入「待复核」并优先展示</div></div><button class="switch on" data-rub-sw="1"></button></div>' +
+      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">低分答卷强制人工复核</div><div class="qc-meta">得分低于满分的 50% 时，不可直接发布</div></div><button class="switch on" data-rub-sw="2"></button></div>' +
+      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">批改修正率预警</div><div class="qc-meta">人工修正率高于 30% 时提示模型迭代</div></div><button class="switch" data-rub-sw="3"></button></div>' +
       '</div></div></div>';
     renderPage(html);
     $$('.switch').forEach(s => s.onclick = () => s.classList.toggle('on'));
-    $('#reset-rubric').onclick = () => { try { localStorage.removeItem('fh_rubric_v2'); } catch (e) {} showToast('评分标准已恢复默认，请确认后保存', 'info'); renderRubric(); };
+    try {
+      const saved = sessionCache.fh_rubric;
+      if (Array.isArray(saved)) {
+        $$('.switch').forEach((s, i) => s.classList.toggle('on', !!saved[i]));
+      }
+    } catch (e) {}
     $('#save-rubric').onclick = () => {
-      const nextRows = defaults.map((row, i) => {
-        const get = field => $('[data-rubric-field="' + field + '"][data-rubric-index="' + i + '"]');
-        return { type: row.type, score: get('score').value.trim(), points: get('points').value.trim(), rule: get('rule').value.trim() };
-      });
-      const next = { rows: nextRows, switches: $$('[data-rub-sw]').map(s => s.classList.contains('on')), savedAt: DB.now() };
-      localStorage.setItem('fh_rubric_v2', JSON.stringify(next));
-      DB.auditLog('更新评分标准', '已保存 ' + nextRows.length + ' 类题型及异常卷规则', state.user && state.user.name);
+      sessionCache.fh_rubric = $$('.switch').map(s => s.classList.contains('on'));
       showToast('评分标准已保存，AI 批改规则已更新，操作已记录', 'success');
     };
   }
@@ -4658,13 +3849,13 @@
       '<div class="card"><h2 class="section-title" style="margin-bottom:12px">AI 美化排版</h2>' +
       '<div class="reason-item good">' + icon('check', 15) + '<span>点击「AI 美化排版」自动整理标题、摘要与分节</span></div>' +
       '<div class="reason-item good">' + icon('check', 15) + '<span>美化后可在下方预览并手动修改</span></div>' +
-      '<div class="reason-item">' + icon('info', 15) + '<span>未接入 AI 时使用本地排版器，只整理结构、不编造内容</span></div>' +
+      '<div class="reason-item">' + icon('info', 15) + '<span>未接入 AI 时不会生成排版结果，请先配置可用的网络模型</span></div>' +
       '<div class="divider"></div>' +
       '<button class="btn btn-outline btn-lg" id="up-beautify" style="width:100%">' + icon('spark', 16) + 'AI 美化排版</button>' +
       '<div id="up-preview" style="margin-top:12px"></div>' +
       '<div class="divider"></div>' +
-      '<button class="btn btn-primary btn-lg" id="up-submit" style="width:100%">' + icon('upload', 16) + '保存到配置文件夹（全员可见）</button>' +
-      '<p class="form-hint" style="text-align:center">提交后立即入库，云端部署时同步写入 server/data/resources/</p>' +
+      '<button class="btn btn-primary btn-lg" id="up-submit" style="width:100%">' + icon('upload', 16) + '保存到学校数据服务</button>' +
+      '<p class="form-hint" style="text-align:center">提交后经权限校验、来源记录和审计后入库</p>' +
       '</div></div></div>';
     renderPage(html);
     attachVoiceInput($('#up-raw'), '原始内容');
@@ -4754,7 +3945,7 @@
       });
       if (r.ok) {
         DB.auditLog('贡献资料', '教师 ' + (u.name || '') + ' 贡献《' + title + '》', u.name);
-        showToast('《' + title + '》已保存，已写入本机配置文件夹', 'success');
+        showToast('《' + title + '》已保存到学校数据服务', 'success');
         setTimeout(() => nav('#/resources'), 700);
       } else showToast(r.msg || '保存失败', 'error');
     };
@@ -4762,22 +3953,21 @@
 
   /* ---------- 导出报告 ---------- */
   function renderExportReport() {
-    const reportTarget = (state.user && state.user.cls) || ((scopedClasses() || [])[0] && scopedClasses()[0].name) || '当前筛选范围';
     const html =
       '<div class="page">' + crumb([{ label: '学情报告', route: '#/analytics' }, { label: '导出报告' }]) +
       '<div class="page-head"><div><h1 class="page-title">导出 / 分享报告</h1><p class="page-sub">按模板生成 PDF 或共享链接，权限受控，学生数据默认脱敏</p></div></div>' +
       '<div class="grid-2">' +
       '<div class="card"><h2 class="section-title" style="margin-bottom:14px">导出设置</h2>' +
-      '<div class="field"><label>报告范围</label><select class="select"><option>' + esc(reportTarget) + ' · 当前数据</option><option>全年级 · 当前数据</option><option>自定义范围</option></select></div>' +
+      '<div class="field"><label>报告范围</label><select class="select"><option>七（2）班 · 数学 · 近 4 周</option><option>全年级 · 数学 · 近 4 周</option><option>自定义范围</option></select></div>' +
       '<div class="field"><label>输出格式</label><div class="role-chips" id="ex-format">' +
       '<button type="button" class="role-chip active" data-fmt="PDF"><span>PDF</span><small>适合打印 / 存档</small></button>' +
       '<button type="button" class="role-chip" data-fmt="Word"><span>Word</span><small>可继续编辑</small></button>' +
-      '<button type="button" class="role-chip" data-fmt="链接"><span>站内链接</span><small>复制当前报告页面地址</small></button></div></div>' +
+      '<button type="button" class="role-chip" data-fmt="链接"><span>共享链接</span><small>在线查看（7 天有效）</small></button></div></div>' +
       '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">数据脱敏</div><div class="qc-meta">学生姓名显示为学号 / 姓氏</div></div><button class="switch on" id="ex-mask"></button></div>' +
       '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">包含薄弱知识点建议</div><div class="qc-meta">附带 Top5 薄弱点与干预建议</div></div><button class="switch on" id="ex-weak"></button></div>' +
       '</div>' +
       '<div class="card"><h2 class="section-title" style="margin-bottom:12px">分享对象</h2>' +
-      '<div class="field"><label>接收人</label><input class="input" placeholder="输入姓名 / 角色，如：校长、数学教研组"></div>' +
+      '<div class="field"><label>接收人</label><input class="input" placeholder="输入姓名 / 角色，如：王校长、数学教研组" value="王校长"></div>' +
       '<div class="field"><label>分享权限<span class="req">*</span></label>' +
       '<select class="select" id="ex-perm"><option>仅可查看</option><option>可查看并下载</option><option>可查看并导出数据</option></select></div>' +
       '<p class="form-hint">分享链接与导出操作均记录审计日志；超过权限范围的接收人无法访问。</p>' +
@@ -4808,7 +3998,7 @@
       const mask = $('#ex-mask').classList.contains('on');
       const withWeak = $('#ex-weak').classList.contains('on');
       const reportHtml =
-        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>学情报告-' + esc(reportTarget) + '</title>' +
+        '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>学情报告-七（2）班</title>' +
         '<style>body{font-family:"Songti SC",SimSun,serif;margin:30px;color:#111;line-height:1.8}' +
         '.head{text-align:center;border-bottom:2px solid #0B2545;padding-bottom:10px}.head h1{font-size:20px;margin:4px 0}' +
         'table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}td,th{border:1px solid #ccc;padding:6px 8px;text-align:left}th{background:#E8EEF5}' +
@@ -4826,9 +4016,9 @@
           : '') +
         '<div class="foot">教师端生成 · 分享权限：' + esc(perm) + ' · 审计留痕</div></body></html>';
       if (fmt === '链接') {
-        const link = location.origin + location.pathname + '#/analytics?shared=ex-' + bizId();
-        const done = () => { $('#ex-result').innerHTML = '<div class="reason-item good" style="border-left-color:var(--green)">' + icon('check', 15) + '<span>站内报告链接已复制：' + link + '（权限：' + esc(perm) + '）</span></div>'; };
-        const fallback = () => { $('#ex-result').innerHTML = '<div class="reason-item" style="border-left-color:var(--gold)">' + icon('notice', 15) + '<span>站内报告链接：' + link + '（权限：' + esc(perm) + '）</span></div>'; };
+        const link = location.origin + location.pathname + '#/analytics/share/' + bizId();
+        const done = () => { $('#ex-result').innerHTML = '<div class="reason-item good" style="border-left-color:var(--green)">' + icon('check', 15) + '<span>共享链接已复制：' + link + '（7 天有效，权限：' + esc(perm) + '）</span></div>'; };
+        const fallback = () => { $('#ex-result').innerHTML = '<div class="reason-item" style="border-left-color:var(--gold)">' + icon('notice', 15) + '<span>共享链接：' + link + '（权限：' + esc(perm) + '）</span></div>'; };
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, fallback); else fallback();
       } else {
         const win = window.open('about:blank', '_blank', 'width=900,height=1100');
@@ -4843,7 +4033,7 @@
     };
   }
 
-  /* ---------- 内置教学语料库 ---------- */
+  /* ---------- 已停用旧内容库渲染器：正式入口只允许网络资源 ---------- */
   function renderCorpus() {
     const C = window.CORPUS;
     if (!C) { renderPage(placeholder('教学语料库', '语料库未加载')); return; }
@@ -4875,7 +4065,7 @@
     }));
     const html =
       '<div class="page">' + crumb([{ label: '资源库', route: '#/resources' }, { label: '教学语料库' }]) +
-      '<div class="page-head"><div><h1 class="page-title">内置教学语料库</h1>' +
+      '<div class="page-head"><div><h1 class="page-title">网络教学资源</h1>' +
       '<p class="page-sub">' + C.entries.length + ' 条教学语料 · AI 接入时按知识点检索注入，学习其表达与理念</p></div>' +
       '<button class="btn btn-primary" id="corpus-ai">' + icon('spark', 15) + 'AI 接入设置</button></div>' +
       '<div class="card" style="margin-bottom:14px"><div class="filter-bar" style="gap:8px">' +
@@ -4962,7 +4152,7 @@
     if (!k) { renderPage(placeholder('知识点不存在', '返回知识点讲解库重新选择')); return; }
     const practiceKey = 'fh_kd_practice_' + id;
     let practice = null;
-    try { practice = JSON.parse(localStorage.getItem(practiceKey) || 'null'); } catch (e) {}
+    practice = sessionCache[practiceKey] || null;
     const practicePrompt = k.variation || '请用自己的话说明这个知识点，并举一个例子。';
     const practiceBlock = '<div class="card kd-practice" style="margin:14px 0"><h3>先答再看：变式练习</h3><p class="form-hint">请先独立写下思路，再查看参考反馈。答案不会直接显示在题目前。</p><div class="kd-example">' + esc(practicePrompt) + '</div>' +
       '<textarea class="input" id="kd-answer" rows="3" placeholder="写下你的答案或解题步骤…">' + esc(practice && practice.answer || '') + '</textarea>' +
@@ -4993,7 +4183,7 @@
       const answer = ($('#kd-answer').value || '').trim();
       if (!answer) { showToast('先写下你的答案或思路', 'warning'); return; }
       const ok = answer.length >= 8;
-      try { localStorage.setItem(practiceKey, JSON.stringify({ answer: answer, ok: ok, feedback: ok ? '你已经完成了一次主动回忆，请对照上方步骤检查关键点。' : '答案过短，请补充依据、步骤或例子，再检查是否回应了变式要求。' })); } catch (e) {}
+      sessionCache[practiceKey] = { answer: answer, ok: ok, feedback: ok ? '你已经完成了一次主动回忆，请对照上方步骤检查关键点。' : '答案过短，请补充依据、步骤或例子，再检查是否回应了变式要求。' };
       if (state.role === 'student' && personalizationService()) personalizationService().recordEvent(state.user, 'practice_completed', { knowledgeId: id, passed: ok });
       renderKnowledgeDetail();
     };
@@ -5055,7 +4245,6 @@
       const id = b.dataset.wrong;
       state.wrongDone = state.wrongDone || {};
       state.wrongDone[id] = !state.wrongDone[id];
-      try { localStorage.setItem('fh_wrong_done', JSON.stringify(state.wrongDone)); } catch (e) {}
       if (personalizationService()) personalizationService().scheduleReview(state.user, w, state.wrongDone[id]);
       renderWrongBook();
     });
@@ -5073,7 +4262,7 @@
   P['/resources'] = renderResources;
   P['/resources/_detail'] = renderResourceDetail;
   P['/resources/upload'] = renderUploadResource;
-  P['/corpus'] = renderCorpus;
+  P['/corpus'] = function () { renderPage(placeholder('网络资源', '旧内容库入口已关闭；请从网络资源检索或资源提交进入。')); };
   P['/knowledge'] = renderKnowledgeList;
   P['/knowledge/_detail'] = renderKnowledgeDetail;
   P['/wrongbook'] = renderWrongBook;

@@ -1,18 +1,15 @@
 /* ================= 凤凰花·智学 · 网络接入层 =================
- * 本地优先：没有配置地址时跟随当前页面；配置地址后可连接局域网或独立 API 服务。
- * 这里只保存 API 地址与访问令牌，不保存 AI 密钥，也不会主动把浏览器数据上传到陌生服务。
+ * 网络优先：没有配置地址时跟随当前页面；配置地址后可连接独立学校数据服务。
+ * 这里只保留当前会话的服务地址，访问令牌由登录会话注入，不进入持久化存储。
  */
 (function () {
   'use strict';
 
-  const STORE_KEY = 'fh_v2_network';
+  let runtimeConfig = { apiBase: '', token: '' };
   let runtime = { state: 'idle', checkedAt: '', status: 0, message: '' };
 
   function readStored() {
-    try {
-      const raw = localStorage.getItem(STORE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) { return {}; }
+    return runtimeConfig;
   }
 
   function initialConfig() {
@@ -47,13 +44,13 @@
 
   function setConfig(patch) {
     const next = normalizeConfig(Object.assign({}, getConfig(), patch || {}));
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch (e) {}
+    runtimeConfig = next;
     emit();
     return next;
   }
 
   function clearConfig() {
-    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    runtimeConfig = { apiBase: '', token: '' };
     runtime = { state: 'idle', checkedAt: '', status: 0, message: '' };
     emit();
   }
@@ -67,11 +64,7 @@
   }
 
   function getToken() {
-    const cfg = getConfig();
-    if (cfg.token) return cfg.token;
-    try {
-      return localStorage.getItem('fh_v2_token') || new URLSearchParams(location.search).get('fh_token') || '';
-    } catch (e) { return ''; }
+    return runtimeConfig.token || '';
   }
 
   function headers(base) {

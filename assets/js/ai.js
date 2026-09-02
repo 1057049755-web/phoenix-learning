@@ -6,7 +6,8 @@
 (function () {
   'use strict';
 
-  const STORE_KEY = 'fh_ai_config';
+  const STORE_KEY = 'fh_ai_config_runtime';
+  let runtimeStore = { version: 3, activeProfileId: '', profiles: [], relayBase: '', style: 'warm' };
 
   const PROVIDERS = {
     zhipu: {
@@ -190,7 +191,8 @@
       protocol: protocol,
       mode: ROUTES[src.mode] ? src.mode : 'auto',
       headers: typeof src.headers === 'string' ? src.headers.slice(0, 4000) : '',
-      apiKey: String(src.apiKey !== undefined ? src.apiKey : (src.key || '')).trim(),
+      /* 密钥只允许存在于服务端环境变量；浏览器配置永远不保存 credential。 */
+      apiKey: '',
       createdAt: src.createdAt || nowIso(),
       updatedAt: nowIso(),
       lastTest: src.lastTest && typeof src.lastTest === 'object' ? {
@@ -202,42 +204,14 @@
     };
   }
   function readStore() {
-    try {
-      const raw = localStorage.getItem(STORE_KEY);
-      const old = raw ? JSON.parse(raw) : {};
-      if (old && Number(old.version) >= CONFIG_VERSION && Array.isArray(old.profiles)) {
-        const profiles = old.profiles.map(normalizeProfile);
-        const activeProfileId = profiles.some(p => p.id === old.activeProfileId) ? old.activeProfileId : (profiles[0] && profiles[0].id) || '';
-        return Object.assign({ version: CONFIG_VERSION, activeProfileId, profiles }, old, { version: CONFIG_VERSION, activeProfileId, profiles });
-      }
-      const provider = String(old.provider || 'openrouter');
-      const legacy = normalizeProfile({
-        id: 'profile_default',
-        name: providerOf(provider).name,
-        provider: provider,
-        endpoint: old.endpoint || providerOf(provider).endpoint,
-        model: old.model || providerOf(provider).model,
-        protocol: old.protocol,
-        mode: old.relayBase ? 'auto' : 'direct',
-        apiKey: old.key || old.apiKey || ''
-      });
-      return {
-        version: CONFIG_VERSION,
-        activeProfileId: legacy.baseUrl || legacy.model || legacy.apiKey ? legacy.id : '',
-        profiles: legacy.baseUrl || legacy.model || legacy.apiKey ? [legacy] : [],
-        relayBase: String(old.relayBase || '').trim(),
-        style: old.style || 'warm',
-        corpus: old.corpus !== false,
-        corpusCats: Array.isArray(old.corpusCats) ? old.corpusCats : ['ancient', 'modern', 'foreign', 'pedagogy']
-      };
-    } catch (e) {
-      return { version: CONFIG_VERSION, activeProfileId: '', profiles: [], relayBase: '', style: 'warm', corpus: true, corpusCats: ['ancient', 'modern', 'foreign', 'pedagogy'] };
-    }
+    const profiles = Array.isArray(runtimeStore.profiles) ? runtimeStore.profiles.map(normalizeProfile) : [];
+    return Object.assign({}, runtimeStore, { version: CONFIG_VERSION, profiles });
   }
   function writeStore(store) {
     const next = Object.assign({ version: CONFIG_VERSION }, store, { version: CONFIG_VERSION });
-    localStorage.setItem(STORE_KEY, JSON.stringify(next));
-    return next;
+    next.profiles = (next.profiles || []).map(profile => normalizeProfile(Object.assign({}, profile, { apiKey: '' })));
+    runtimeStore = next;
+    return runtimeStore;
   }
   function publicProfile(profile) {
     const p = Object.assign({}, profile || {});
@@ -313,33 +287,20 @@
     return publicProfile(store.profiles.find(item => item.id === id));
   }
   function emitConfigChange() {
-    publishStatus(null);
     try { window.dispatchEvent(new CustomEvent('fh-ai-config-changed', { detail: getConfig() })); } catch (e) {}
-    serverStatus().then(publishStatus).catch(() => {});
-  }
-
-  function publishStatus(status) {
-    window.__FH_AI_STATUS__ = status || null;
-    try { window.dispatchEvent(new CustomEvent('fh-ai-status-changed', { detail: status || null })); } catch (e) {}
   }
 
   function isConfigured() {
-    const p = activeProfile(true);
-    const status = window.__FH_AI_STATUS__;
-    const directReady = !!(p && p.mode !== 'relay' && canUseDirect(p));
-    const relayReady = !!(status && status.configured && status.route === 'relay' && (!p || p.mode !== 'direct'));
-    return directReady || relayReady;
+    return !!(window.__FH_AI_STATUS__ && window.__FH_AI_STATUS__.configured);
   }
 
   function providerLabel() {
     const p = activeProfile(true);
-    const status = window.__FH_AI_STATUS__;
-    if (status && status.configured && status.route === 'relay' && (!p || p.mode !== 'direct')) return '学校 AI 服务';
-    if (p && p.mode !== 'relay' && canUseDirect(p)) {
+    if (window.__FH_AI_STATUS__ && window.__FH_AI_STATUS__.configured) return '学校 AI 服务';
+    if (p && p.model && endpointFor(p) && (p.apiKey || providerOf(p.provider).auth === 'none' || providerOf(p.provider).auth === 'optional')) {
       return (providerOf(p.provider).name || 'AI 连接') + ' · ' + p.model;
     }
-    if (p && p.mode === 'relay') return '服务端 AI 未连接';
-    return '未连接 AI 服务';
+    return 'AI 服务未配置';
   }
 
   /* ---------- 通用对话 ---------- */
@@ -353,8 +314,7 @@
     return normalizeProfile(merged);
   }
   function canUseDirect(profile) {
-    const p = providerOf(profile.provider);
-    return !!(endpointFor(profile) && profile.model && (profile.apiKey || p.auth === 'none' || p.auth === 'optional'));
+    return false;
   }
   function parseCustomHeaders(profile) {
     if (!profile || !profile.headers) return {};
@@ -422,12 +382,8 @@
   }
 
   async function serverStatus() {
-    const profile = activeProfile(true);
-    const direct = profile && canUseDirect(profile);
-    const relay = profile && profile.mode === 'direct' ? { ok: false, configured: false } : await relayStatus();
-    if (relay.ok && relay.configured) return Object.assign(relay, { model: relay.model || (profile && profile.model) || '', direct: false });
-    if (direct && (!profile || profile.mode !== 'relay')) return { ok: true, configured: true, direct: true, route: 'direct', model: profile.model, endpoint: endpointFor(profile) };
-    return Object.assign(relay, { model: (profile && profile.model) || relay.model || '' });
+    const relay = await relayStatus();
+    return Object.assign(relay, { direct: false, route: 'relay' });
   }
 
   async function directRequest(profile, messages, opts) {
@@ -456,16 +412,15 @@
     } finally { clearTimeout(timer); }
   }
 
-  /* 请求模型：优先服务端中转，自动模式可在中转未配置时回退浏览器直连。 */
+  /* 请求模型：只允许服务端中转，浏览器不直连模型服务。 */
   async function chat(messages, opts) {
     opts = opts || {};
     const profile = profileWithSecret(opts.profile || null);
     const timeout = opts.timeout || 45000;
     const temperature = opts.temperature != null ? opts.temperature : 0.7;
     const maxTokens = opts.maxTokens || 1400;
-    const canDirect = canUseDirect(profile);
-    const mode = profile.mode || 'auto';
-    if (mode !== 'direct' && await relayAvailable()) {
+    const mode = 'relay';
+    if (await relayAvailable()) {
       const rctl = new AbortController();
       const rtimer = setTimeout(() => rctl.abort(), Math.max(timeout, 90000));
       try {
@@ -478,19 +433,16 @@
         });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || !data.ok) {
-          if ((!data || data.code === 'AI_NOT_CONFIGURED') && mode === 'auto' && canDirect) return directRequest(profile, messages, { timeout, temperature, maxTokens });
           const err = new Error((data && data.msg) || ('模型服务异常（HTTP ' + res.status + '）'));
           err.code = data && data.code; err.status = res.status; err.retryable = !!(data && data.retryable); throw err;
         }
         return String(data.content || '').trim();
       } catch (e) {
         if (e && e.name === 'AbortError') throw new Error('服务端中转超时，请稍后重试或切换连接方式');
-        if (mode === 'auto' && canDirect) return directRequest(profile, messages, { timeout, temperature, maxTokens });
         throw e;
       } finally { clearTimeout(rtimer); }
     }
-    if (mode !== 'relay' && canDirect) return directRequest(profile, messages, { timeout, temperature, maxTokens });
-    throw new Error(mode === 'relay' ? '服务端中转不可用或尚未配置模型' : '当前连接缺少可用的模型配置');
+    throw new Error('服务端中转不可用或尚未配置模型');
   }
 
   async function testProfile(input) {
@@ -659,18 +611,16 @@
 
   /* ---------- 受众约束（注入所有面向用户的生成工作流） ---------- */
   const AUDIENCE_CONSTRAINT =
-    '受众约束（最重要，必须遵守）：使用本系统的是偏远落后地区义务教育阶段的学生、教师和家长，' +
+    '受众约束（最重要，必须遵守）：使用本系统的是偏远落后地区义务教育阶段的学生、教师和教务人员，' +
     '语言必须平实、通俗、具体，禁止只甩专业术语；若必须使用专业术语（如“最近发展区”“迁移”“元认知”），' +
     '必须紧跟一句大白话解释（例如“孩子跳一跳能够得着的地方”）。' +
     '建议必须具体到每天/每次怎么做（如“每天 10 分钟口算、每两天做 1 道变式题”），不能只给方向不给做法；' +
     '要像一位耐心、说人话的乡村教师那样讲解：先讲清概念，再用生活里的例子说明，最后给出可执行的做法。';
 
-  /* ---------- 提示词收尾：统一注入受众约束与教学语料（各工作流复用） ---------- */
+  /* ---------- 提示词收尾：统一注入年级、学科与安全约束 ---------- */
   function finalizePrompt(body, kw) {
     let out = String(body || '');
     out += '\n' + AUDIENCE_CONSTRAINT;
-    const corpus = corpusPrompt({ kw: kw });
-    if (corpus) out += '\n\n' + corpus;
     return out;
   }
 
@@ -866,18 +816,9 @@
       .map(s => s.trim())
       .filter(Boolean)
       .filter(a => a !== answer);
-    /* 阅读题必须带材料：模型漏传时自动从公有领域阅读库补齐，避免“只有题干没有文章” */
+    /* 阅读题必须带材料；材料缺失时由校验拒绝，不使用本地内容补齐。 */
     let passage = type === '阅读题' ? String(raw.passage || raw.material || '') : '';
     let sourceNote = type === '阅读题' ? String(raw.sourceNote || raw.source || '') : '';
-    if (type === '阅读题' && !passage.trim()) {
-      const rd = window.CORPUS && window.CORPUS.pickReading
-        ? window.CORPUS.pickReading(opts && opts.subject === 'english' ? 'en' : 'zh', { diff: diff, seed: idx })
-        : null;
-      if (rd) {
-        passage = rd.passage;
-        sourceNote = sourceNote || '本文改编自《' + rd.title + '》（' + rd.source + '，' + rd.license + '），有删改。';
-      }
-    }
     /* 阅读题结构：长文本 + 编号小题（1. 2. 3.）——缺失小题时自动补标准模板 */
     let stem = String(raw.stem || '');
     if (type === '阅读题' && !/\d+[\.．、]\s*\S/.test(stem)) {
@@ -886,9 +827,7 @@
         '\n2. 结合上下文，赏析材料中画线句或关键语句的表达效果。' +
         '\n3. 结合材料内容与自己的生活体验，谈谈你获得的启示。';
     }
-    const genre = type === '阅读题' && window.CORPUS && window.CORPUS.classifyReading
-      ? window.CORPUS.classifyReading(passage, opts && opts.subject === 'english' ? 'en' : 'zh').genre
-      : '';
+    const genre = raw.genre ? String(raw.genre).trim() : '';
     return {
       id: 0, no: idx + 1,
       type: type,
@@ -914,36 +853,7 @@
     };
   }
 
-  function basicFallback(spec, idx, subject) {
-    if (subject === 'zh') {
-      const rd = window.CORPUS && window.CORPUS.pickReading ? window.CORPUS.pickReading('zh', { diff: spec.diff, seed: idx }) : null;
-      if (!rd) return null;
-      const sourceNote = '选自《' + rd.title + '》（' + rd.source + '，' + rd.license + '），本地审核语料 v' + (window.CORPUS.version || '1.0') + '。';
-      const rawZh = spec.type === '阅读题'
-        ? { type: spec.type, diff: spec.diff, passage: rd.passage, sourceNote: sourceNote, stem: '1. 请概括材料的主要内容。\n2. 结合材料说明作者表达的主要情感或观点。\n3. 摘录一个关键词句，并说明它在文中的作用。', answer: '1. 围绕材料主要事件与中心内容概括。\n2. 依据原文关键词句归纳，不脱离材料。\n3. 摘录准确，并从内容或结构作用说明。', explain: '①知识点回顾：阅读答案必须回到原文。\n②思考过程：先找人物、事件与关键词句。\n③推理过程：用原文证据支持概括。\n④易错点：不要写与材料无关的空泛感想。\n⑤举一反三：换一个段落继续做证据定位。', process: '通读材料—圈画关键词—定位证据—组织答案—回读核对', kp: '内容概括、情感主旨与关键词句作用；所有判断以材料证据为准。' }
-        : { type: '判断题', diff: spec.diff, stem: '阅读材料时，回答主旨题可以完全不引用或依据原文。', options: [], answer: '错误', explain: '①知识点回顾：阅读理解重证据。\n②思考过程：主旨需要从人物、事件和关键词句归纳。\n③推理过程：没有原文依据的结论不可核查。\n④易错点：把个人感想当作材料主旨。\n⑤举一反三：每个结论至少标出一处文本证据。', process: '判断说法—回到材料—寻找证据—得出结论', kp: '文本证据与主旨概括。', sourceNote: sourceNote };
-      const qzh = normalizeQuestion(rawZh, Object.assign({}, spec, { type: rawZh.type }), idx, { subject: 'zh' });
-      if (qzh) { qzh.source = '本地题目，请教师复核'; qzh.fromAI = false; qzh.sourceStatus = '本地已审核'; }
-      return qzh;
-    }
-    if (subject !== 'math') return null;
-    const n = idx + 2;
-    const answer = String(n + 3);
-    const raw = { type: spec.type, diff: spec.diff, stem: '计算：' + n + ' + 3 =（  ）', options: ['A. ' + (n + 1), 'B. ' + (n + 2), 'C. ' + answer, 'D. ' + (n + 4)], answer: 'C', explain: '①知识点回顾：整数加法。\n②思考过程：把两个数相加。\n③计算过程：' + n + ' + 3 = ' + answer + '。\n④易错点：看清加号，不要误写成减法。\n⑤举一反三：尝试计算 ' + n + ' + 4。', process: n + ' + 3 = ' + answer, kp: '整数加法：理解加法意义并按位计算。' };
-    if (spec.type === '判断题') { raw.stem = n + ' + 3 = ' + answer + '。'; raw.options = []; raw.answer = '正确'; }
-    if (spec.type !== '选择题' && spec.type !== '判断题') { raw.options = []; raw.answer = answer; }
-    const q = normalizeQuestion(raw, spec, idx, { subject: subject });
-    if (q) { q.source = '本地基础题，请教师复核'; q.fromAI = false; }
-    return q;
-  }
-
-  /* ---------- 内置语料库检索注入（以审核语料约束生成质量） ---------- */
-  function corpusPrompt(params) {
-    if (!window.CORPUS || !window.CORPUS.corpusBlock) return '';
-    try { return window.CORPUS.corpusBlock(params); } catch (e) { return ''; }
-  }
-
-  /* ---------- 分块生成（每块 2-3 题，避免一次信息过多；自动补全缺漏） ---------- */
+  /* ---------- 分块生成（每块 2-3 题；缺漏直接失败并要求重试） ---------- */
   async function enforceDifficulty(batch, chunk, params) {
     const lines = batch.map((q, i) =>
       '第 ' + (i + 1) + ' 题（目标难度：' + chunk[i].diff + '）：题型=' + q.type + ' 题干=' + q.stem + ' 答案=' + q.answer
@@ -989,7 +899,7 @@
       const specLines = chunk.map((s, j) =>
         '第 ' + (start + j + 1) + ' 题：题型=' + s.type + '，难度=' + s.diff
       ).join('\n');
-      const corpus = corpusPrompt({ kw: kps + ' ' + (params.subjectText || '') + ' ' + (params.gradeText || '') });
+      const corpus = '';
       const needReading = chunk.some(s => s.type === '阅读题');
       const band = gradeBandFocus(params.subjectKey, params.grade);
       const hardLine = SUBJECT_HARD_LINE[params.subjectKey] || SUBJECT_HARD_LINE.math;
@@ -1034,7 +944,7 @@
         try {
           parsed = await askJSON(prompt, { temperature: 0.7, maxTokens: 2600, expect: 'array' });
         } catch (err) {
-          break; // 单次生成不重复扣费；立即进入本地审核题库回退
+          break;
         }
         batch = chunk.map((spec, j) => normalizeQuestion(parsed[j], spec, start + j, { subject: params.subjectKey })).filter(Boolean);
       }
@@ -1049,15 +959,7 @@
       const filtered = [];
       batch.forEach(q => { if (uniqueQuestion(q, used)) filtered.push(q); });
       batch = filtered;
-      /* AI 不可用时只对数学基础题回退；回退题明确标记，仍需教师复核 */
-      if (batch.length < chunk.length) {
-        const existing = new Set(batch.map(stemKey));
-        for (let j = 0; j < chunk.length && batch.length < chunk.length; j++) {
-          const fb = basicFallback(chunk[j], start + j, params.subjectKey);
-          if (fb && !existing.has(stemKey(fb))) { existing.add(stemKey(fb)); batch.push(fb); }
-        }
-        if (batch.length < chunk.length) throw new Error('AI 返回不完整，且暂无适用的本地基础题，请教师补题后再发布');
-      }
+      if (batch.length < chunk.length) throw new Error('在线 AI 返回不完整，请重试或转入教师人工补题');
       results.push.apply(results, batch);
       if (params.onProgress) {
         params.onProgress(
@@ -1169,29 +1071,19 @@
     return { rawMin: rawMin, suggested: suggested, exam: exam, formulaExam: formulaExam, preset: preset };
   }
 
-  /* ---------- 来源检索：本地审核语料优先，外部网络仅作可追溯补充 ---------- */
+  /* ---------- 来源检索：直接网络采集失败后再进入 AI 搜索，再请求教师补充 ---------- */
   function wikiBase(lang, project) {
     lang = lang === 'en' ? 'en' : 'zh';
     project = project === 'wikipedia' ? 'wikipedia' : 'wikisource';
     return 'https://' + lang + '.' + project + '.org/w/api.php';
   }
 
-  /* 本地语料检索辅助（多处复用）：按语言取分类范围、封装检索、提取首个页面 */
-  function corpusCatsFor(lang) {
-    return lang === 'zh' ? ['ancient', 'modern', 'pedagogy'] : ['foreign', 'pedagogy'];
-  }
-  function retrieveLocal(kw, lang, max) {
-    if (!window.CORPUS || !window.CORPUS.retrieve) return [];
-    return window.CORPUS.retrieve(kw, { cats: corpusCatsFor(lang), max: max || 8 });
-  }
   function firstPage(pages, pred) {
     const list = Object.keys(pages || {}).map(k => pages[k]);
     return pred ? (list.find(pred) || null) : (list[0] || null);
   }
 
   async function searchSources(kw, lang, project) {
-    const local = retrieveLocal(kw, lang, 8);
-    if (local.length) return local.map(s => ({ title: s.title, snippet: s.excerpt, size: String(s.excerpt || '').length, source: s.source, version: window.CORPUS.version || 'local' , access: '本地已审核' }));
     const url = wikiBase(lang, project) +
       '?action=query&format=json&origin=*&list=search&srlimit=8&srsearch=' + encodeURIComponent(String(kw || ''));
     const res = await fetch(url);
@@ -1241,11 +1133,6 @@
   }
 
   async function fetchSourceRemote(title, lang, project) {
-    const local = retrieveLocal(title, lang, 1);
-    if (local.length) {
-      const item = local[0];
-      return { title: item.title, text: String(item.excerpt || '').slice(0, 1800), genre: '教材语料', lang: lang, source: item.source, version: window.CORPUS.version || 'local', access: '本地已审核' };
-    }
     let page = await fetchWikiPage(title, lang, project);
     let text = page ? String(page.extract || '').trim() : '';
     if (text.length < 40) {
@@ -1255,24 +1142,12 @@
         text = String(fallback.extract).trim();
       }
     }
-    if (!text || text.length < 40) throw new Error('该页面没有可用的正文（可能为目录/重定向页），建议改用内置语料库');
-    if (lang === 'zh' && window.CORPUS && window.CORPUS.convertZh) {
-      text = window.CORPUS.convertZh(text);
-    }
-    const suit = window.CORPUS && window.CORPUS.suitableReading
-      ? window.CORPUS.suitableReading(text, lang)
-      : { genre: '散文', ok: true };
-    if (!suit.ok) throw new Error('该页面不适合作为阅读材料：' + suit.reason + '，建议改用内置语料库');
-    return { title: (page && page.title) || title, text: text.slice(0, 1800), genre: suit.genre, lang: lang, source: lang + '.' + project + '.org', version: 'network', access: '网络成功，教师复核' };
+    if (!text || text.length < 40) throw new Error('该页面没有可用的正文，请改用官方来源或由教师补充材料');
+    return { title: (page && page.title) || title, text: text.slice(0, 1800), genre: '待审核', lang: lang, source: lang + '.' + project + '.org', version: 'network', access: '网络成功，教师复核' };
   }
 
   async function fetchSource(title, lang, project) {
-    try { return await fetchSourceRemote(title, lang, project); }
-    catch (err) {
-      const local = retrieveLocal(title, lang, 1);
-      if (local.length) return { title: local[0].title, text: String(local[0].excerpt || '').slice(0, 1800), genre: '教材语料', lang: lang, source: local[0].source, version: window.CORPUS.version || 'local', access: '网络失败，回退本地已审核内容；教师复核' };
-      throw new Error('检索失败，暂无本地已审核材料；请教师补充来源后再生成');
-    }
+    return fetchSourceRemote(title, lang, project);
   }
 
   /* ---------- 批改：生成评分 / 评语 / 错因 ---------- */
@@ -1343,7 +1218,7 @@
       '薄弱知识点：' + weak + '\n' +
       '近期错题：' + wrongs + '\n\n' +
       '只输出一个 JSON 对象，格式：\n' +
-      '{"phase":"阶段名称","goal":"一句话阶段目标","weeks":[{"week":1,"focus":"本周主题","tasks":["具体任务1","具体任务2","具体任务3"],"check":"完成标准"}],"specialTopics":["针对薄弱点的专项建议1","专项建议2"],"parentTips":["家长配合建议1","家长配合建议2"]}\n' +
+      '{"phase":"阶段名称","goal":"一句话阶段目标","weeks":[{"week":1,"focus":"本周主题","tasks":["具体任务1","具体任务2","具体任务3"],"check":"完成标准"}],"specialTopics":["针对薄弱点的专项建议1","专项建议2"]}\n' +
       '要求：任务具体可执行（如每天 10 分钟口算、每两天 1 道变式题），与薄弱知识点强相关，不输出其他文字。',
       (params.student || '') + ' ' + weak + ' 学习计划 教师建议'
     );
@@ -1358,8 +1233,7 @@
         tasks: Array.isArray(w.tasks) ? w.tasks.map(String) : [],
         check: String(w.check || '')
       })),
-      specialTopics: Array.isArray(parsed.specialTopics) ? parsed.specialTopics.map(String) : [],
-      parentTips: Array.isArray(parsed.parentTips) ? parsed.parentTips.map(String) : []
+      specialTopics: Array.isArray(parsed.specialTopics) ? parsed.specialTopics.map(String) : []
     };
   }
 
@@ -1480,16 +1354,10 @@
     estimatePaperTime: estimatePaperTime,
     searchSources: searchSources,
     fetchSource: fetchSource,
-    corpusPrompt: corpusPrompt,
-    retrieveCorpus: function (kw, opts) {
-      return window.CORPUS ? window.CORPUS.retrieve(kw, opts) : [];
-    },
-    stylePrompt: function (id) {
-      return window.CORPUS ? window.CORPUS.stylePrompt(id) : '';
-    },
+    retrieveCorpus: function () { return []; },
+    stylePrompt: function () { return ''; },
     normalizeQuestion: normalizeQuestion,
     validateQuestion: validateQuestion,
-    basicFallback: basicFallback,
     gradeBand: gradeBand,
     gradeBandFocus: gradeBandFocus,
     DIFF_ANCHOR: DIFF_ANCHOR,
@@ -1504,5 +1372,5 @@
     beautifyResource: beautifyResource,
     testConnection: testConnection
   };
-  serverStatus().then(publishStatus).catch(() => publishStatus(null));
+  serverStatus().then(s => { window.__FH_AI_STATUS__ = s; }).catch(() => {});
 })();

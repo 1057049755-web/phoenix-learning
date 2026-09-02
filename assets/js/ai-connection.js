@@ -36,8 +36,6 @@
     var root = opts.root;
     if (!root || !window.AI) return;
     var canEdit = !!opts.isAdmin;
-    var wasModalLocked = document.documentElement.classList.contains('fh-ai-modal-open');
-    document.documentElement.classList.add('fh-ai-modal-open');
     var profiles = window.AI.getProfiles();
     var activeId = window.AI.getConfig().activeProfileId || (profiles[0] && profiles[0].id) || '';
     var selectedId = activeId;
@@ -153,10 +151,7 @@
       query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm());
       updateRouteNote();
     }
-    function close() {
-      root.innerHTML = '';
-      if (!wasModalLocked) document.documentElement.classList.remove('fh-ai-modal-open');
-    }
+    function close() { root.innerHTML = ''; }
     query('[data-ai-close]').addEventListener('click', close);
     query('.fh-ai-mask').addEventListener('click', function (event) { if (event.target === event.currentTarget) close(); });
     field('provider').addEventListener('change', setProviderDefaults);
