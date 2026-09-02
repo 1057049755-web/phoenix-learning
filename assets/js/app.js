@@ -385,8 +385,8 @@
   function renderLogin() {
     const cloudInfo = DB.cloudInfo();
     $('#login-view').innerHTML =
-      '<div class="login-card login-card-modern">' +
-      '<section class="login-splash" aria-label="凤凰花智学欢迎页"><div class="splash-orbit orbit-a"></div><div class="splash-orbit orbit-b"></div><div class="splash-particles"></div><div class="splash-copy"><span class="splash-kicker">AI × 教育 · 智慧学习工作台</span><h1>让每一次学习，<br><em>都被看见。</em></h1><p>从知识理解到精准反馈，陪伴老师与学生把复杂的事做简单。</p><button type="button" class="btn btn-primary btn-lg" id="enter-login">开始使用 <span aria-hidden="true">→</span></button><button type="button" class="splash-skip" id="reduce-motion">减少动态效果</button><button type="button" class="splash-skip" id="gaze-toggle">开启视线互动（可选）</button><span class="splash-camera-status" id="gaze-status" role="status">默认关闭摄像头；视线互动需主动开启</span></div></section>' +
+      '<div class="login-card login-card-modern is-intro">' +
+      '<section class="login-splash" aria-label="凤凰花智学欢迎页"><div class="login-splash__photo" aria-hidden="true"><img src="assets/brand/generated/hero-learning-library.png" alt=""></div><div class="login-splash__veil"></div><div class="splash-copy"><span class="splash-kicker"><i></i>凤凰花·智学 / PHOENIX LEARNING</span><h1>让每一次学习，<br><em>都被看见。</em></h1><p>从知识理解到精准反馈，陪伴老师与学生把复杂的事做简单。</p><div class="splash-actions"><button type="button" class="btn btn-primary btn-lg" id="enter-login">开始使用 <span aria-hidden="true">→</span></button><span class="splash-scroll-hint"><span>01</span> 用一个小目标，开启今天</span></div><div class="splash-skip-row"><button type="button" class="splash-skip" id="reduce-motion">减少动态效果</button></div></div><div class="splash-caption"><span>LEARN WITH PURPOSE</span><strong>每个人，都有<br>自己的节奏。</strong></div></section>' +
       '<section class="login-panel" id="login-panel" hidden>' +
       '<div class="login-brand"><span class="brand-mark">' +
       '<img src="assets/brand/logo-blue-transparent.png" width="42" height="42" alt="凤凰花·智学标识"></span>' +
@@ -414,7 +414,8 @@
     state.loginRole = ['admin', 'teacher', 'student'].includes(hintedRole) ? hintedRole : 'teacher';
     const defaultRole = $('[data-login-role="' + state.loginRole + '"]');
     if (defaultRole) defaultRole.classList.add('active');
-    const enter = () => { panel.hidden = false; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); const first = $('#login-phone'); if (first) first.focus(); };
+    const card = document.querySelector('.login-card-modern');
+    const enter = () => { if (card) card.classList.remove('is-intro'); panel.hidden = false; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); const first = $('#login-phone'); if (first) first.focus(); };
     $('#enter-login').onclick = enter;
     const stage = document.querySelector('.login-splash');
     if (stage) {
@@ -423,16 +424,20 @@
       stage.addEventListener('pointerleave', () => { stage.style.setProperty('--mx', '50%'); stage.style.setProperty('--my', '45%'); stage.style.setProperty('--px', '0px'); stage.style.setProperty('--py', '0px'); });
     }
     $('#reduce-motion').onclick = () => { document.documentElement.classList.toggle('reduce-motion'); showToast(document.documentElement.classList.contains('reduce-motion') ? '已减少动态效果' : '已恢复动态效果', 'info'); };
-    let gazeStream = null;
-    $('#gaze-toggle').onclick = async () => {
-      const status = $('#gaze-status'); const toggle = $('#gaze-toggle');
-      if (gazeStream) { gazeStream.getTracks().forEach(t => t.stop()); gazeStream = null; toggle.textContent = '开启视线互动（可选）'; status.textContent = '视线互动已关闭，摄像头已停止；鼠标/触控互动仍可用'; return; }
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status.textContent = '当前浏览器不支持摄像头；已回退到鼠标/触控互动'; return; }
-      if (location.protocol === 'file:') { status.textContent = '本地文件模式无法安全申请摄像头；请先启动本地服务并使用 localhost/HTTPS'; return; }
-      status.textContent = '正在请求摄像头权限…';
-      try { gazeStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); toggle.textContent = '关闭摄像头增强'; status.textContent = '摄像头增强已开启（本版本仅验证权限，不进行人脸/视线识别；不上传、不保存）；点击按钮即可停止'; }
-      catch (e) { status.textContent = e && e.name === 'NotAllowedError' ? '摄像头权限被拒绝；已回退到鼠标/触控互动' : '摄像头不可用；已回退到鼠标/触控互动'; }
-    };
+    const gazeToggle = $('#gaze-toggle');
+    if (gazeToggle) {
+      let gazeStream = null;
+      gazeToggle.onclick = async () => {
+        const status = $('#gaze-status'); const toggle = $('#gaze-toggle');
+        if (!status) return;
+        if (gazeStream) { gazeStream.getTracks().forEach(t => t.stop()); gazeStream = null; toggle.textContent = '开启视线互动（可选）'; status.textContent = '视线互动已关闭，摄像头已停止；鼠标/触控互动仍可用'; return; }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status.textContent = '当前浏览器不支持摄像头；已回退到鼠标/触控互动'; return; }
+        if (location.protocol === 'file:') { status.textContent = '本地文件模式无法安全申请摄像头；请先启动本地服务并使用 localhost/HTTPS'; return; }
+        status.textContent = '正在请求摄像头权限…';
+        try { gazeStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); toggle.textContent = '关闭摄像头增强'; status.textContent = '摄像头增强已开启（本版本仅验证权限，不进行人脸/视线识别；不上传、不保存）；点击按钮即可停止'; }
+        catch (e) { status.textContent = e && e.name === 'NotAllowedError' ? '摄像头权限被拒绝；已回退到鼠标/触控互动' : '摄像头不可用；已回退到鼠标/触控互动'; }
+      };
+    }
     $$('.third-party-btn').forEach(b => b.onclick = () => showToast(b.dataset.oauth + ' 登录尚未配置，请联系管理员配置 OAuth', 'info'));
     $$('[data-login-role]').forEach(b => b.onclick = () => { $$('[data-login-role]').forEach(x => x.classList.remove('active')); b.classList.add('active'); state.loginRole = b.dataset.loginRole; showToast('已选择' + b.textContent + '身份，请使用该身份账号登录', 'info'); $('#login-phone').focus(); });
 

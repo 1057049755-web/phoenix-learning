@@ -1320,3 +1320,88 @@ kbd {
   .ai-workspace-dialog { width:100%;max-height:96vh;border-radius:18px 18px 0 0; }.ai-workspace-head { padding:18px 16px 14px; }.ai-workspace-mark { width:40px;height:40px;border-radius:13px; }.ai-workspace-head .dialog-title { font-size:19px; }.ai-workspace-layout { padding:15px 16px;grid-template-columns:1fr;gap:15px; }.ai-task-options { display:grid;grid-template-columns:1fr 1fr; }.ai-task-option { min-height:86px;padding:10px; }.ai-workspace-dialog > .dialog-actions { padding:0 16px 16px; }.ai-result-actions { display:grid;grid-template-columns:1fr 1fr; }.ai-result-actions .btn { width:100%;padding:0 7px; }
   .checklist-ai-bar { align-items:stretch;flex-direction:column; }.checklist-ai-bar .btn { width:100%;justify-content:center; }.note-ai-panel > div:first-child { align-items:flex-start;flex-direction:column; }.announcement-ai-head { align-items:stretch;flex-direction:column; }.announcement-ai-head .btn { width:100%;justify-content:center; }
 }
+
+/* 登录首屏与手机端修复：用真实学习场景替代高饱和装饰，并恢复自然阅读顺序 */
+.login-view { min-height:100svh; align-items:flex-start; padding:24px; background:#f5f5f7; }
+.login-card-modern { position:relative; width:min(1280px,100%); min-height:min(780px,calc(100svh - 48px)); border-radius:30px; background:#fff; box-shadow:0 24px 80px rgba(28,35,48,.12); }
+.login-card-modern.is-intro { grid-template-columns:1fr; }
+.login-splash { --mx:50%; --my:45%; --px:0px; --py:0px; min-height:720px; padding:clamp(48px,7vw,108px); isolation:isolate; background:#f5f5f7; color:#1d1d1f; }
+.login-splash::before,.splash-orbit,.splash-particles { display:none; }
+.login-splash__photo { position:absolute; z-index:-2; inset:0; overflow:hidden; background:#f5f5f7; }
+.login-splash__photo img { width:100%; height:100%; object-fit:cover; object-position:center; transform:translate3d(calc(var(--px)*.12),calc(var(--py)*.12),0) scale(1.035); transition:transform .6s cubic-bezier(.2,.8,.2,1); }
+.login-splash__veil { position:absolute; z-index:-1; inset:0; background:linear-gradient(90deg,rgba(245,245,247,.98) 0%,rgba(245,245,247,.90) 27%,rgba(245,245,247,.42) 58%,rgba(245,245,247,.08) 100%); }
+.splash-copy { max-width:540px; transform:none; }
+.splash-kicker { color:#6e6e73; font-size:11px; letter-spacing:.14em; }
+.splash-kicker i { width:7px; height:7px; display:inline-block; margin-right:8px; border-radius:50%; background:#0071e3; box-shadow:0 0 0 5px rgba(0,113,227,.12); }
+.splash-kicker::before { display:none; }
+.splash-copy h1 { color:#1d1d1f; font-size:clamp(50px,6.3vw,84px); line-height:1.02; letter-spacing:-.075em; }
+.splash-copy em { color:#0071e3; text-shadow:none; }
+.splash-copy p { max-width:430px; color:#6e6e73; font-size:16px; line-height:1.75; }
+.splash-actions { display:flex; align-items:center; flex-wrap:wrap; gap:18px; }
+.splash-actions .btn-primary { background:#0071e3; border-color:#0071e3; box-shadow:0 10px 24px rgba(0,113,227,.18); }
+.splash-scroll-hint { color:#6e6e73; font-size:11px; }
+.splash-scroll-hint span { margin-right:7px; color:#0071e3; font:10px "SFMono-Regular",Consolas,monospace; }
+.splash-skip-row { margin-top:24px; }
+.splash-skip { margin:0; color:#6e6e73; }
+.splash-caption { position:absolute; right:42px; bottom:38px; text-align:right; }
+.splash-caption span { display:block; margin-bottom:8px; color:#6e6e73; font:9px "SFMono-Regular",Consolas,monospace; letter-spacing:.14em; }
+.splash-caption strong { color:#1d1d1f; font-size:21px; line-height:1.15; letter-spacing:-.045em; }
+.login-panel { position:static; transform:none; width:auto; max-height:none; overflow:visible; padding:clamp(32px,5vw,60px); background:rgba(255,255,255,.96); border-left:1px solid rgba(60,60,67,.10); }
+.login-panel .login-title { color:#1d1d1f; font-size:26px; letter-spacing:-.05em; }
+.login-panel .login-sub { color:#6e6e73; }
+.login-panel .input { border-color:rgba(60,60,67,.15); border-radius:12px; background:#fbfbfd; }
+.login-panel .input:focus { border-color:#0071e3; box-shadow:0 0 0 4px rgba(0,113,227,.13); }
+.login-role-picker { flex-wrap:wrap; }
+.login-role-picker button.active { color:#0071e3; background:rgba(0,113,227,.09); border-color:#0071e3; }
+.third-party-btn { border-radius:10px; background:#fbfbfd; }
+.login-view button:focus-visible,.login-view input:focus-visible { outline:2px solid #0071e3; outline-offset:2px; }
+@media (max-width:760px) {
+  .login-view { align-items:stretch; padding:0; background:#f5f5f7; }
+  .login-card-modern,.login-card-modern.is-intro { display:block; width:100%; min-height:100svh; border-radius:0; box-shadow:none; }
+  .login-splash { min-height:640px; padding:64px 22px 38px; align-items:flex-end; }
+  .login-card-modern.is-intro .login-splash { min-height:100svh; }
+  .login-splash__veil { background:linear-gradient(180deg,rgba(245,245,247,.78) 0%,rgba(245,245,247,.45) 28%,rgba(245,245,247,.87) 66%,#f5f5f7 100%); }
+  .splash-copy { max-width:none; }
+  .splash-copy h1 { font-size:clamp(42px,12vw,62px); line-height:1.05; }
+  .splash-copy p { max-width:330px; font-size:14px; line-height:1.7; }
+  .splash-actions { align-items:flex-start; flex-direction:column; gap:11px; }
+  .splash-caption { right:20px; bottom:28px; }
+  .splash-caption strong { font-size:17px; }
+  .login-panel { position:static; display:flex; width:auto; max-height:none; overflow:visible; padding:30px 20px calc(42px + env(safe-area-inset-bottom)); border-left:0; border-top:1px solid rgba(60,60,67,.10); }
+  .login-panel .login-brand { justify-content:flex-start; }
+  .login-panel .login-title { font-size:25px; }
+  .third-party-grid { grid-template-columns:repeat(3,1fr); gap:8px; }
+  .third-party-btn { min-height:52px; }
+}
+@media (max-width:420px) {
+  .login-splash { min-height:600px; padding-left:18px; padding-right:18px; }
+  .splash-caption { display:none; }
+  .login-panel { padding-left:18px; padding-right:18px; }
+  .login-role-picker { gap:5px; }
+  .login-role-picker button { padding:7px 9px; }
+  .third-party-grid { grid-template-columns:repeat(2,1fr); }
+}
+
+/* 登录表单的浅色可读性覆盖：避免旧版暗色面板规则污染新布局 */
+.login-panel { color:#1d1d1f; }
+.login-panel[hidden] { display:none !important; }
+.login-panel .login-brand .brand-text { color:#1d1d1f; }
+.login-panel .login-brand .brand-mark img { filter:none; }
+.login-panel .field label { color:#1d1d1f; }
+.login-panel .req { color:#ff3b30; }
+.login-panel .input { color:#1d1d1f; caret-color:#0071e3; }
+.login-panel .input::placeholder { color:#86868b; }
+.login-panel .input:hover { background:#fff; border-color:rgba(0,113,227,.38); }
+.login-panel .input:focus { background:#fff; }
+.login-panel input.input:-webkit-autofill,.login-panel input.input:-webkit-autofill:hover,.login-panel input.input:-webkit-autofill:focus { -webkit-text-fill-color:#1d1d1f !important; box-shadow:0 0 0 1000px #fff inset,0 0 0 3px rgba(0,113,227,.13) !important; border-color:#0071e3 !important; }
+.login-panel .form-hint { color:#6e6e73; }
+.login-panel > .login-role-picker { color:#6e6e73; }
+.login-panel .login-role-picker button { color:#424245; background:#fbfbfd; border-color:rgba(60,60,67,.16); }
+.login-panel .login-role-picker button.active { color:#0071e3; background:rgba(0,113,227,.09); border-color:#0071e3; }
+.login-panel .third-party-login { border-top-color:rgba(60,60,67,.12); }
+.login-panel .third-party-title { color:#424245; }
+.login-panel .third-party-title small { color:#6e6e73; }
+.login-panel .third-party-btn { color:#424245; background:#fbfbfd; border-color:rgba(60,60,67,.16); }
+.login-panel .third-party-btn small { color:#86868b; }
+.login-panel .btn-primary { color:#fff; background:#0071e3; border-color:#0071e3; box-shadow:0 10px 24px rgba(0,113,227,.15); }
+.login-panel .login-foot,.login-panel .login-note { color:#86868b; }
