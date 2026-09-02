@@ -1,0 +1,75 @@
+/* 个性化学习层：独立前缀，避免影响原有三端页面 */
+.fh-personal-section { margin: 0 0 18px; padding: 20px; border: 1px solid rgba(62, 145, 157, .18); border-radius: 20px; background: linear-gradient(135deg, rgba(240, 251, 250, .96), rgba(247, 250, 255, .96)); box-shadow: 0 12px 30px rgba(29, 74, 95, .06); }
+.fh-personal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.fh-personal-kicker { display: block; margin-bottom: 5px; color: #4a9499; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.fh-personal-head h2 { margin: 0; color: #183b50; font-size: 22px; letter-spacing: -.04em; }
+.fh-personal-head p { max-width: 620px; margin: 6px 0 0; color: #718795; font-size: 12px; line-height: 1.7; }
+.fh-personal-profile { display: flex; flex-wrap: wrap; gap: 7px; margin: 16px 0 15px; }
+.fh-personal-pill { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 999px; color: #47717c; background: rgba(255, 255, 255, .78); font-size: 11px; }
+.fh-personal-edit { flex: 0 0 auto; min-height: 34px; padding: 0 12px; border: 1px solid rgba(68, 133, 150, .24); border-radius: 10px; color: #397580; background: rgba(255, 255, 255, .65); font-size: 11px; font-weight: 700; }
+.fh-personal-edit:hover { color: #1c5060; border-color: rgba(68, 133, 150, .45); background: #fff; }
+.fh-personal-feed { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.fh-personal-card { min-width: 0; display: flex; flex-direction: column; padding: 14px; border: 1px solid rgba(72, 137, 148, .14); border-radius: 15px; background: rgba(255, 255, 255, .86); }
+.fh-personal-card:hover { border-color: rgba(72, 137, 148, .32); box-shadow: 0 10px 24px rgba(29, 74, 95, .08); }
+.fh-personal-card-main { flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; }
+.fh-personal-card-main:focus-visible, .fh-personal-feedback button:focus-visible, .fh-personal-task button:focus-visible { outline: 3px solid rgba(63, 155, 165, .35); outline-offset: 3px; }
+.fh-personal-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 9px; }
+.fh-personal-subject, .fh-personal-score { padding: 3px 7px; border-radius: 7px; color: #43838b; background: #e9f6f5; font-size: 9px; font-weight: 800; }
+.fh-personal-score { color: #9a7946; background: #fff4df; }
+.fh-personal-card h3 { overflow: hidden; margin: 0; color: #294c5d; font-size: 15px; white-space: nowrap; text-overflow: ellipsis; }
+.fh-personal-card p { display: -webkit-box; overflow: hidden; min-height: 40px; margin: 7px 0 10px; color: #718691; font-size: 11px; line-height: 1.7; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.fh-personal-reason { display: flex; gap: 5px; min-height: 31px; color: #518187; font-size: 10px; line-height: 1.55; }
+.fh-personal-reason::before { content: "为你"; flex: 0 0 auto; height: 18px; padding: 1px 5px; border-radius: 5px; color: #fff; background: #66acaf; font-size: 9px; font-weight: 800; }
+.fh-personal-feedback { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; padding-top: 9px; border-top: 1px solid #edf3f3; }
+.fh-personal-feedback button { min-height: 27px; padding: 0 7px; border: 1px solid #dfebec; border-radius: 7px; color: #789098; background: #fbfdfd; font-size: 10px; }
+.fh-personal-feedback button:hover { color: #2f7981; border-color: #a9d1d1; background: #effafa; }
+.fh-personal-empty { padding: 18px; color: #82959d; border-radius: 13px; background: rgba(255, 255, 255, .7); font-size: 12px; }
+.fh-personal-plan-section { background: linear-gradient(135deg, rgba(247, 249, 255, .98), rgba(241, 252, 249, .96)); }
+.fh-personal-task-list { display: grid; gap: 8px; margin-top: 14px; }
+.fh-personal-task { display: grid; grid-template-columns: 31px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 11px 12px; border: 1px solid rgba(82, 131, 151, .13); border-radius: 12px; background: rgba(255, 255, 255, .86); }
+.fh-personal-task.is-done { opacity: .65; }
+.fh-personal-task.is-done .fh-personal-task-title { color: #718d8d; text-decoration: line-through; }
+.fh-personal-task-check { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid #afd2d3; border-radius: 50%; color: #fff; background: #fff; }
+.fh-personal-task.is-done .fh-personal-task-check { border-color: #55a9a0; background: #55a9a0; }
+.fh-personal-task-title { overflow: hidden; color: #315366; font-size: 12px; font-weight: 800; white-space: nowrap; text-overflow: ellipsis; }
+.fh-personal-task-detail { overflow: hidden; margin-top: 3px; color: #83959b; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.fh-personal-task-link { min-height: 29px; padding: 0 8px; border: 1px solid #d5e7e7; border-radius: 8px; color: #46868d; background: #f7fcfc; font-size: 10px; }
+.fh-personal-task-link:hover { background: #eaf7f7; }
+.fh-personal-footnote { margin: 12px 0 0; color: #82969b; font-size: 10px; line-height: 1.6; }
+.fh-personal-dialog { max-width: 620px; }
+.fh-personal-dialog .dialog-body { margin-bottom: 14px; }
+.fh-personal-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.fh-personal-form-grid .field-full { grid-column: 1 / -1; }
+.fh-personal-checks { display: flex; flex-wrap: wrap; gap: 7px; }
+.fh-personal-check { position: relative; }
+.fh-personal-check input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.fh-personal-check span { display: inline-flex; align-items: center; min-height: 34px; padding: 0 11px; border: 1px solid #d9e7e8; border-radius: 9px; color: #6d818a; background: #fbfdfd; font-size: 11px; cursor: pointer; }
+.fh-personal-check input:checked + span { color: #2d747b; border-color: #7eb9bb; background: #eaf8f7; box-shadow: inset 0 0 0 1px #7eb9bb; }
+.fh-personal-check input:focus-visible + span { outline: 3px solid rgba(63, 155, 165, .28); outline-offset: 2px; }
+.fh-personal-weekly { margin: 0 0 15px; padding: 13px 14px; border: 1px solid rgba(67, 138, 148, .14); border-radius: 14px; background: rgba(255, 255, 255, .64); }
+.fh-personal-weekly-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fh-personal-weekly-head b { display: block; color: #31596a; font-size: 12px; }
+.fh-personal-weekly-head span { display: block; margin-top: 3px; color: #8a9da1; font-size: 10px; }
+.fh-personal-weekly-head > strong { flex: 0 0 auto; color: #3e858d; font-size: 12px; }
+.fh-personal-progress { height: 6px; overflow: hidden; margin: 11px 0 10px; border-radius: 999px; background: #e4efee; }
+.fh-personal-progress i { display: block; height: 100%; min-width: 6px; border-radius: inherit; background: linear-gradient(90deg, #65b7b0, #4a8bb9); transition: width .3s ease; }
+.fh-personal-weekly-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.fh-personal-weekly-metrics span { color: #81969a; font-size: 10px; }
+.fh-personal-weekly-metrics strong { display: block; margin-bottom: 2px; color: #31596a; font-size: 16px; line-height: 1.1; }
+.fh-personal-next { display: flex; align-items: baseline; gap: 8px; margin-top: 11px; padding-top: 9px; border-top: 1px solid #e6f0ef; color: #81969a; font-size: 10px; }
+.fh-personal-next b { overflow: hidden; color: #4d7d84; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 900px) { .fh-personal-feed { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .fh-personal-section { padding: 15px; border-radius: 16px; }
+  .fh-personal-head { align-items: stretch; flex-direction: column; gap: 10px; }
+  .fh-personal-edit { align-self: flex-start; }
+  .fh-personal-feed, .fh-personal-form-grid { grid-template-columns: 1fr; }
+  .fh-personal-weekly-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 11px; }
+  .fh-personal-next { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .fh-personal-next b { max-width: 100%; }
+  .fh-personal-task { grid-template-columns: 28px minmax(0, 1fr); }
+  .fh-personal-task-link { grid-column: 2; justify-self: start; }
+  .fh-personal-form-grid .field-full { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .fh-personal-card, .fh-personal-edit { transition: none !important; } }

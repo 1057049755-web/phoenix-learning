@@ -1,0 +1,108 @@
+/* 凤凰花·智学 AI 连接中心：偏配置工作台的密度，保留当前项目的青蓝色调。 */
+html.fh-ai-modal-open, html.fh-ai-modal-open body { overflow:hidden; }
+.fh-ai-mask { overflow:hidden; overscroll-behavior:contain; }
+.fh-ai-dialog { width:min(960px,calc(100vw - 32px)); max-width:960px; height:min(92vh,860px); max-height:92vh; min-height:0; display:flex; flex-direction:column; overflow:hidden; padding:0; color:#28485d; background:#f7fbfc; border:1px solid rgba(62,123,145,.17); box-shadow:0 24px 80px rgba(25,67,89,.22); }
+.fh-ai-dialog__head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:24px 26px 20px; background:linear-gradient(135deg,#f9ffff,#edf7f8); border-bottom:1px solid #dcebed; }
+.fh-ai-dialog__kicker { display:block; margin-bottom:7px; color:#4b929a; font-size:10px; font-weight:850; letter-spacing:.13em; text-transform:uppercase; }
+.fh-ai-dialog__title { margin:0; color:#25465d; font-size:24px; letter-spacing:-.03em; }
+.fh-ai-dialog__subtitle { max-width:650px; margin:8px 0 0; color:#718895; font-size:11.5px; line-height:1.7; }
+.fh-ai-dialog__close { flex:none; width:42px; height:42px; display:grid; place-items:center; border:1px solid #d5e4e8; border-radius:12px; background:#fff; color:#6f8793; font-size:24px; line-height:1; cursor:pointer; }
+.fh-ai-dialog__close:hover { color:#315d70; background:#edf8f8; }
+.fh-ai-dialog__body { flex:1 1 auto; display:grid; grid-template-columns:268px minmax(0,1fr); min-width:0; min-height:0; height:auto; max-height:none; overflow:hidden; overscroll-behavior:contain; }
+.fh-ai-profiles { min-width:0; min-height:0; height:100%; padding:18px 14px; background:#eff7f8; border-right:1px solid #dcebed; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+.fh-ai-profiles__head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 4px 12px; }
+.fh-ai-profiles__head h3 { margin:0; color:#395c6c; font-size:12px; }
+.fh-ai-profiles__head small { display:block; margin-top:3px; color:#8a9da5; font-size:10px; }
+.fh-ai-new { min-width:44px; min-height:44px; border:1px solid #c5e0e3; border-radius:12px; background:#fff; color:#3c8d94; font-size:20px; cursor:pointer; }
+.fh-ai-new:hover { border-color:#67aeb3; background:#f7ffff; }
+.fh-ai-profile-list { display:grid; gap:8px; }
+.fh-ai-profile { width:100%; min-height:84px; padding:12px; display:block; border:1px solid #dce9eb; border-radius:14px; background:rgba(255,255,255,.72); text-align:left; color:inherit; cursor:pointer; transition:border-color .18s ease,background .18s ease,box-shadow .18s ease; }
+.fh-ai-profile:hover { border-color:#a9d1d5; background:#fff; }
+.fh-ai-profile.is-selected { border-color:#55a1a7; background:#fff; box-shadow:0 7px 18px rgba(53,122,132,.1); }
+.fh-ai-profile__top,.fh-ai-profile__meta { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.fh-ai-profile__name { min-width:0; overflow:hidden; color:#31596b; font-size:12px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }
+.fh-ai-profile__active { flex:none; padding:3px 6px; border-radius:999px; color:#fff; background:#4fa09c; font-size:9px; font-weight:800; }
+.fh-ai-profile__provider { display:block; margin-top:7px; overflow:hidden; color:#77909b; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.fh-ai-profile__meta { margin-top:9px; color:#9aaab1; font-size:9.5px; }
+.fh-ai-profile__meta span:last-child { color:#5a8d93; }
+.fh-ai-empty { padding:18px 10px; border:1px dashed #c9dfe2; border-radius:13px; color:#78909b; font-size:10.5px; line-height:1.65; text-align:center; }
+.fh-ai-editor { min-width:0; min-height:0; height:100%; overflow-y:auto; background:#fff; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+.fh-ai-editor__head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:20px 24px 15px; border-bottom:1px solid #e7eff0; }
+.fh-ai-editor__eyebrow { margin:0 0 5px; color:#88a0a8; font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.fh-ai-editor__head h3 { margin:0; color:#2e5367; font-size:18px; }
+.fh-ai-editor__head p { margin:5px 0 0; color:#8499a1; font-size:10.5px; }
+.fh-ai-status-pill { flex:none; min-height:30px; display:inline-flex; align-items:center; gap:7px; padding:0 10px; border:1px solid #dce9eb; border-radius:999px; color:#7d969d; background:#f8fbfb; font-size:10px; font-weight:750; }
+.fh-ai-status-pill::before { content:""; width:7px; height:7px; border-radius:50%; background:#b5c4c8; }
+.fh-ai-status-pill.is-ok { color:#318a63; border-color:#cbe8d8; background:#f2fbf5; }
+.fh-ai-status-pill.is-ok::before { background:#36a86e; }
+.fh-ai-status-pill.is-warn { color:#ad792e; border-color:#f0dfbd; background:#fffaf0; }
+.fh-ai-status-pill.is-warn::before { background:#d39432; }
+.fh-ai-form { padding:20px 24px 0; }
+.fh-ai-section { margin-bottom:20px; padding-bottom:17px; border-bottom:1px solid #e7eff0; }
+.fh-ai-section:last-child { margin-bottom:0; border-bottom:0; }
+.fh-ai-section__head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.fh-ai-section__head h4 { margin:0; color:#385e70; font-size:12px; }
+.fh-ai-section__head p { margin:4px 0 0; color:#91a2a8; font-size:10px; line-height:1.5; }
+.fh-ai-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.fh-ai-grid .fh-ai-field--wide { grid-column:1 / -1; }
+.fh-ai-field { min-width:0; }
+.fh-ai-field label { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; color:#526f7d; font-size:10.5px; font-weight:750; }
+.fh-ai-field label small { color:#9aabb0; font-size:9px; font-weight:500; }
+.fh-ai-field input,.fh-ai-field select,.fh-ai-field textarea { width:100%; min-height:44px; box-sizing:border-box; border:1px solid #d8e6e9; border-radius:11px; outline:0; background:#fbfdfd; color:#38566a; font:inherit; font-size:12px; transition:border-color .18s ease,box-shadow .18s ease,background .18s ease; }
+.fh-ai-field input,.fh-ai-field select { padding:0 12px; }
+.fh-ai-field textarea { min-height:76px; padding:10px 12px; resize:vertical; line-height:1.55; }
+.fh-ai-field input:hover,.fh-ai-field select:hover,.fh-ai-field textarea:hover { border-color:#a9cdd1; background:#fff; }
+.fh-ai-field input:focus,.fh-ai-field select:focus,.fh-ai-field textarea:focus { border-color:#4fa1a8; background:#fff; box-shadow:0 0 0 3px rgba(79,161,168,.13); }
+.fh-ai-field input:disabled,.fh-ai-field select:disabled,.fh-ai-field textarea:disabled { color:#889ba2; background:#f4f8f8; cursor:not-allowed; }
+.fh-ai-help { margin:6px 0 0; color:#8b9fa5; font-size:9.5px; line-height:1.55; }
+.fh-ai-model-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+.fh-ai-model-row input { min-width:0; }
+.fh-ai-inline-btn,.fh-ai-clear-key { min-height:44px; padding:0 12px; border:1px solid #cfe1e5; border-radius:11px; background:#f7fbfb; color:#4a7e89; font-size:10.5px; font-weight:750; cursor:pointer; }
+.fh-ai-inline-btn:hover,.fh-ai-clear-key:hover { border-color:#75b5ba; background:#effafa; }
+.fh-ai-inline-btn:disabled { opacity:.55; cursor:wait; }
+.fh-ai-key-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+.fh-ai-key-row input { min-width:0; }
+.fh-ai-clear-key { white-space:nowrap; }
+.fh-ai-route-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.fh-ai-route { min-height:74px; padding:10px; display:flex; flex-direction:column; justify-content:center; gap:5px; border:1px solid #d9e7e9; border-radius:12px; background:#fbfdfd; color:#53717e; text-align:left; cursor:pointer; }
+.fh-ai-route:hover { border-color:#9cc9cd; background:#f7ffff; }
+.fh-ai-route.is-active { border-color:#55a2a8; background:#effafa; box-shadow:0 0 0 2px rgba(85,162,168,.08); }
+.fh-ai-route strong { font-size:11px; }
+.fh-ai-route span { color:#8a9ca3; font-size:9px; line-height:1.45; }
+.fh-ai-route input { position:absolute; opacity:0; pointer-events:none; }
+.fh-ai-preview { display:flex; align-items:flex-start; gap:8px; margin-top:10px; padding:9px 10px; border-radius:10px; background:#f2f8f9; color:#6e8993; font-size:9.5px; line-height:1.55; overflow-wrap:anywhere; }
+.fh-ai-preview b { flex:none; color:#4c7884; }
+.fh-ai-notice { margin-top:10px; padding:10px 11px; border-left:3px solid #73adb1; border-radius:8px; background:#f3f8f9; color:#718a94; font-size:10px; line-height:1.6; }
+.fh-ai-editor__foot { display:flex; align-items:center; gap:8px; padding:17px 24px 22px; border-top:1px solid #e7eff0; background:#fbfdfd; }
+.fh-ai-editor__foot .fh-ai-foot-status { flex:1; min-width:0; color:#8a9ca3; font-size:10px; line-height:1.45; }
+.fh-ai-btn { min-height:44px; padding:0 14px; border:1px solid #d6e5e7; border-radius:11px; background:#fff; color:#50707d; font-size:10.5px; font-weight:800; cursor:pointer; }
+.fh-ai-btn:hover { border-color:#8abec1; background:#f2fbfb; }
+.fh-ai-btn:disabled { opacity:.55; cursor:not-allowed; }
+.fh-ai-btn--primary { border-color:#3f8f98; background:#3f8f98; color:#fff; box-shadow:0 8px 16px rgba(63,143,152,.16); }
+.fh-ai-btn--primary:hover { border-color:#347b84; background:#347b84; }
+.fh-ai-btn--danger { margin-right:auto; color:#b26770; border-color:#efd9dc; background:#fffafa; }
+.fh-ai-btn--danger:hover { border-color:#dfb8be; background:#fff4f5; }
+.fh-ai-lock { margin:0 24px 18px; padding:10px 11px; border-radius:10px; background:#fff8e9; color:#946f32; font-size:10px; line-height:1.55; }
+.fh-ai-toast { position:fixed; z-index:10010; right:24px; bottom:24px; max-width:340px; padding:11px 14px; border:1px solid #cfe5e4; border-radius:11px; color:#365f69; background:#f5fffe; box-shadow:0 12px 30px rgba(40,80,90,.14); font-size:11px; opacity:0; transform:translateY(8px); pointer-events:none; transition:opacity .2s ease,transform .2s ease; }
+.fh-ai-toast.is-visible { opacity:1; transform:translateY(0); }
+@media (max-width:760px) {
+  .fh-ai-dialog { width:100%; height:96vh; max-height:96vh; border-radius:18px 18px 0 0; }
+  .fh-ai-dialog__head { padding:19px 16px 16px; }
+  .fh-ai-dialog__title { font-size:20px; }
+  .fh-ai-dialog__subtitle { font-size:10.5px; }
+  .fh-ai-dialog__body { display:block; flex:1 1 auto; height:auto; max-height:none; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+  .fh-ai-profiles { height:auto; padding:12px 14px; border-right:0; border-bottom:1px solid #dcebed; overflow:visible; }
+  .fh-ai-profile-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .fh-ai-profile { min-height:76px; }
+  .fh-ai-editor { height:auto; overflow:visible; }
+  .fh-ai-editor__head,.fh-ai-form { padding-left:16px; padding-right:16px; }
+  .fh-ai-editor__foot { position:sticky; bottom:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); flex-wrap:wrap; }
+  .fh-ai-editor__foot .fh-ai-foot-status { flex-basis:100%; }
+  .fh-ai-btn--danger { margin-right:0; }
+  .fh-ai-grid,.fh-ai-route-grid { grid-template-columns:1fr; }
+  .fh-ai-grid .fh-ai-field--wide { grid-column:auto; }
+  .fh-ai-toast { right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); left:14px; max-width:none; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .fh-ai-profile,.fh-ai-field input,.fh-ai-field select,.fh-ai-field textarea,.fh-ai-toast { transition:none; }
+}
