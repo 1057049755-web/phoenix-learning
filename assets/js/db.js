@@ -12,7 +12,7 @@
     'graduation_archives', 'resources', 'notices', 'papers', 'grading', 'plans', 'profiles',
     'knowledge', 'content_tags', 'goals', 'plan_tasks', 'learning_events',
     'recommendation_feedback', 'review_schedule', 'data_dictionary', 'question_manifests',
-    'explanations', 'model_providers', 'api_models', 'source_records', 'audit'
+    'explanations', 'source_records', 'audit'
   ];
   const empty = { users: [], resources: [], notices: [], papers: [], grading: { recognized: [], grading: [], review: [], done: [] }, plans: [], audit: [] };
   let data = JSON.parse(JSON.stringify(empty));
@@ -224,6 +224,24 @@
   function markNoticeRead(id, userId) { return upsertRecord('notices', { id, readBy: [userId || currentUser()?.id].filter(Boolean) }); }
   function grading() { return data.grading; }
   function addGradingItem(item) { const group = item.status || 'recognized'; data.grading[group] = data.grading[group] || []; data.grading[group].push(Object.assign({ id: uid('grading'), createdAt: now() }, item)); persist('grading', data.grading); }
+  function updateGradingItem(id, patch) {
+    const groups = Object.keys(data.grading || {});
+    for (const group of groups) {
+      const list = Array.isArray(data.grading[group]) ? data.grading[group] : [];
+      const index = list.findIndex(item => String(item.id) === String(id));
+      if (index < 0) continue;
+      const previous = list[index];
+      const next = Object.assign({}, previous, patch || {}, { updatedAt: now() });
+      if (next.status && next.status !== group) {
+        list.splice(index, 1);
+        data.grading[next.status] = data.grading[next.status] || [];
+        data.grading[next.status].push(next);
+      } else list[index] = next;
+      persist('grading', data.grading);
+      return { ok: true, item: next };
+    }
+    return { ok: false, msg: '批改记录不存在' };
+  }
   function savePlan(record) { return upsertRecord('plans', Object.assign({}, record, { createdAt: now() })); }
   function auditLog(op, detail, by) { return upsertRecord('audit', { id: uid('audit'), action: op, detail, by, createdAt: now() }); }
   function exportBundle() { return JSON.stringify({ version: 3, exportedAt: now(), data: data }, null, 2); }
@@ -235,7 +253,7 @@
     importRosterCSV, rosterTemplate, rosterExport, parseCSV,
     resources, addResource, updateResource, removeResource, beautifyResource,
     notices, pushNotice, addNotice, updateNotice, removeNotice, markNoticeRead,
-    grading, addGradingItem, savePlan, auditLog, exportBundle, importBundle,
+    grading, addGradingItem, updateGradingItem, savePlan, auditLog, exportBundle, importBundle,
     uid, now, today: () => new Date().toISOString().slice(0, 10)
   };
 })();

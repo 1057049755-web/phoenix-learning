@@ -8,7 +8,7 @@
   const subjects = {
     chinese: { code: 'chinese', name: '语文' },
     math: { code: 'math', name: '数学' },
-    foreign_language: { code: 'foreign_language', name: '外语' },
+    english: { code: 'english', name: '英语' },
     science: { code: 'science', name: '科学' },
     physics: { code: 'physics', name: '物理' },
     chemistry: { code: 'chemistry', name: '化学' },
@@ -25,7 +25,7 @@
 
   const emptyTextbook = code => ({
     name: subjects[code].name,
-    versions: [{ id: 'network', name: '学校已配置版本', default: true, books: {} }]
+    versions: []
   });
 
   const nav = {
@@ -123,7 +123,13 @@
     TEXTBOOKS: {
       chinese: emptyTextbook('chinese'),
       math: emptyTextbook('math'),
-      foreign_language: emptyTextbook('foreign_language')
+      english: emptyTextbook('english'),
+      physics: emptyTextbook('physics'),
+      chemistry: emptyTextbook('chemistry'),
+      biology: emptyTextbook('biology'),
+      history: emptyTextbook('history'),
+      ethics: emptyTextbook('ethics'),
+      geography: emptyTextbook('geography')
     },
     PAPER_PRESETS: {},
     KNOWLEDGE: [],

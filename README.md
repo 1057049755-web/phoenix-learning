@@ -6,7 +6,7 @@
 
 - 账号、班级、课程、作业、试卷、批改和审计数据必须由服务端数据库保存。
 - 浏览器只保留当前会话令牌；业务数据不会写入 localStorage，也不会在无服务时伪造“在线”状态。
-- AI 只通过服务端配置的 HTTPS 网络接口调用，API Key 不下发到浏览器。
+- AI 请求统一经服务端中转；连接中心的 Key 只保存在当前设备的独立凭据槽中，调用时短暂提交给服务端，不进入业务记录、导出包或工作流日志。
 - 学生手机号在学生可见范围内始终脱敏；管理员导入账号时由服务端加密保存身份字段。
 - 系统不提供家长端、不提供拍照搜题、不收录只能本地部署的模型。
 
@@ -28,6 +28,19 @@
 | `GET/PUT /api/col/:name` | 访问已鉴权业务集合 |
 | `GET /api/ai/status` | 返回真实网络 AI 状态 |
 | `POST /api/ai/chat` | 通过服务端中转调用模型 |
+| `GET /api/reference/catalog` | 读取已入库的官方教材目录、章节标题和年度卷型 |
+| `GET /api/reference/models` | 读取最近一次官方模型目录、价格字段和可用状态 |
+| `POST /api/admin/models/sync` | 管理员从服务商官方接口同步模型目录 |
+| `GET/POST /api/learning/assignments` | 教师布置作业、学生读取作业 |
+| `GET/POST /api/learning/submissions` | 学生保存草稿、补交和正式提交 |
+| `GET/POST /api/learning/feedback` | 教师保存反馈、发布学生可见结果 |
+| `GET/POST /api/learning/wrongbook` | 保存和读取错题复习条目 |
+| `GET/POST /api/learning/notes` | 保存和读取学生笔记 |
+| `GET/PATCH /api/learning/notifications/:id` | 学习通知与已读状态 |
+| `POST /api/analytics/reports` | 服务器确定性统计与逐科三次作业门槛 |
+| `GET/PUT /api/analytics/reports/:id` | 读取报告或保存 AI 解读结果 |
+| `GET/POST /api/sources` | 合规公开资料采集或用户手动补充 |
+| `POST /api/plots/validate` | 校验结构化 SVG、脚本安全和无障碍信息 |
 
 没有 D1 数据库绑定或没有必要密钥时，服务应返回明确的不可用状态，不得回退到示例数据或浏览器存储。
 
@@ -44,3 +57,5 @@
 3. 禁止空鉴权密钥启动写接口。
 4. 检查 `/api/ping`、`/api/health`、`/api/ai/status` 与登录链路。
 5. 记录构建版本、提交号和部署时间。
+
+模型目录同步可在 Cloudflare 定时触发器中调用 Worker 的 `scheduled` 入口；每次同步会在 D1 中保留运行记录和变更快照。教材与地区卷型按 `server/migrations/003_official_reference_catalog.sql` 版本化入库，模型注册中心由 `004` 初始化、`005` 完成旧目录备份与清空、`006`、`008` 和 `009` 扩展官方网络 API 服务商入口。学习闭环与资料字段由 `007_learning_loop_and_sources.sql` 建立。

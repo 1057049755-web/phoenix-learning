@@ -55,7 +55,11 @@
 .fh-ai-field input:focus,.fh-ai-field select:focus,.fh-ai-field textarea:focus { border-color:#4fa1a8; background:#fff; box-shadow:0 0 0 3px rgba(79,161,168,.13); }
 .fh-ai-field input:disabled,.fh-ai-field select:disabled,.fh-ai-field textarea:disabled { color:#889ba2; background:#f4f8f8; cursor:not-allowed; }
 .fh-ai-help { margin:6px 0 0; color:#8b9fa5; font-size:9.5px; line-height:1.55; }
+.fh-ai-provider-meta a { color:#3d8b94; text-decoration:underline; text-underline-offset:2px; }
+.fh-ai-price { margin:7px 0 0; padding:8px 10px; border-radius:9px; color:#55767e; background:#f2f8f8; font-size:10px; line-height:1.55; }
 .fh-ai-model-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+.fh-ai-model-row input,.fh-ai-model-row select { min-width:0; }
+.fh-ai-sync-btn { white-space:nowrap; }
 .fh-ai-model-row input { min-width:0; }
 .fh-ai-inline-btn,.fh-ai-clear-key { min-height:44px; padding:0 12px; border:1px solid #cfe1e5; border-radius:11px; background:#f7fbfb; color:#4a7e89; font-size:10.5px; font-weight:750; cursor:pointer; }
 .fh-ai-inline-btn:hover,.fh-ai-clear-key:hover { border-color:#75b5ba; background:#effafa; }

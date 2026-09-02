@@ -6,8 +6,8 @@
 
   const always = ['ethics', 'chinese', 'math', 'pe_health', 'arts', 'labor', 'integrated_practice'];
   const primary = ['science'];
-  const upperPrimary = ['foreign_language', 'information_technology'];
-  const splitJunior = ['foreign_language', 'history', 'geography', 'biology', 'information_technology'];
+  const upperPrimary = ['english', 'information_technology'];
+  const splitJunior = ['english', 'history', 'geography', 'biology', 'information_technology'];
 
   function gradeNumber(value) {
     const match = String(value == null ? '' : value).match(/[1-9]/);
@@ -27,15 +27,15 @@
       if (grade >= 9 && ctx.scienceRoute !== 'comprehensive_science') codes.add('chemistry');
       if (grade >= 9 && ctx.scienceRoute !== 'comprehensive_science') ['geography', 'biology', 'information_technology'].forEach(code => codes.delete(code));
     }
-    if (grade <= 2) codes.delete('foreign_language');
-    if (ctx.foreignLanguage) codes.add('foreign_language');
+    if (grade <= 2) codes.delete('english');
+    if (ctx.foreignLanguage) codes.add('english');
     const result = Array.from(codes).map(subjectCode => ({
       subjectCode,
       grade,
       term: ctx.term,
       status: 'active',
       source: 'national_default',
-      overrideRequired: ['foreign_language', 'information_technology', 'science', 'physics', 'chemistry'].includes(subjectCode)
+      overrideRequired: ['english', 'information_technology', 'science', 'physics', 'chemistry'].includes(subjectCode)
     }));
     return { system: ctx.system, grade, scienceRoute: ctx.scienceRoute, offerings: result };
   }
@@ -46,7 +46,7 @@
     buildOfferings,
     math: {},
     chinese: {},
-    foreign_language: {},
+    english: {},
     science: {},
     physics: {},
     chemistry: {},
