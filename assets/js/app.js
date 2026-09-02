@@ -1249,7 +1249,7 @@
     }
     renderShell();
     const renderer = window.__pages[path] ||
-      (path.match(/^\/grading\/\d+$/) ? window.__pages['/grading/_detail'] :
+      (path.match(/^\/grading\/[^/]+$/) ? window.__pages['/grading/_detail'] :
         path.match(/^\/resources\/\d+$/) ? window.__pages['/resources/_detail'] :
         path.match(/^\/knowledge\/[\w-]+$/) ? window.__pages['/knowledge/_detail'] :
         window.__pages['/placeholder']);
@@ -1636,6 +1636,109 @@
     to.unshift(item);
     DB.saveCollection('grading');
     return item;
+  }
+
+  const gradingTimers = {};
+  function gradingItem(id) {
+    const G = DB.grading();
+    const groups = ['recognized', 'grading', 'review', 'done'];
+    for (const key of groups) {
+      const item = (G[key] || []).find(x => String(x.id) === String(id));
+      if (item) return { item: item, key: key };
+    }
+    return null;
+  }
+  function gradingAnswers(item) {
+    return Array.isArray(item && item.answers) && item.answers.length
+      ? item.answers
+      : [{ no: 1, title: '答卷内容', text: '已上传答卷，识别文本待教师核对。' }];
+  }
+  function removeGradingItem(id) {
+    const found = gradingItem(id);
+    if (!found) return null;
+    if (gradingTimers[id]) { clearInterval(gradingTimers[id]); delete gradingTimers[id]; }
+    const list = DB.grading()[found.key] || [];
+    const index = list.findIndex(x => String(x.id) === String(id));
+    if (index < 0) return null;
+    const removed = list.splice(index, 1)[0];
+    DB.saveCollection('grading');
+    return removed;
+  }
+  async function startGradingItem(id) {
+    const found = gradingItem(id);
+    if (!found || found.key === 'done') return;
+    if (found.key === 'review') { showToast('该答卷已进入待复核，请打开后完成评分', 'info'); return; }
+    if (gradingTimers[id]) { showToast('该答卷正在批改中，请稍候', 'info'); return; }
+    if (found.key === 'recognized') {
+      moveQueueItem(id, 'recognized', 'grading', { status: 'grading', progress: 12, note: '正在整理识别结果', startedAt: DB.now() });
+    }
+    const current = gradingItem(id);
+    if (!current) return;
+    const started = Date.now();
+    const finish = async () => {
+      const latest = gradingItem(id);
+      if (!latest) return;
+      const target = latest.item;
+      target.progress = 100;
+      target.status = 'review';
+      target.note = 'AI 预批改完成，等待教师复核';
+      target.time = '刚刚';
+      target.answers = gradingAnswers(target);
+      let aiMessage = '';
+      if (window.AI && window.AI.isConfigured()) {
+        try {
+          const result = await window.AI.gradeAnswer({ task: target.task, total: target.total || 100, answers: target.answers });
+          const score = Number(result && result.score);
+          if (Number.isFinite(score)) target.score = Math.max(0, Math.min(target.total || 100, Math.round(score)));
+          target.comment = result && result.comment ? String(result.comment) : '';
+          target.reasons = Array.isArray(result && result.reasons) ? result.reasons : [];
+          target.confidence = 'AI 已生成，待教师复核';
+          aiMessage = '，AI 已生成初稿';
+        } catch (e) {
+          target.confidence = 'AI 暂不可用，待人工评分';
+          target.note = '识别完成，AI 暂不可用，请教师人工复核';
+        }
+      } else {
+        target.confidence = '待人工评分';
+      }
+      DB.saveCollection('grading');
+      DB.auditLog('开始批改', target.name + ' 已进入待复核' + aiMessage, state.user && state.user.name);
+      delete gradingTimers[id];
+      showToast(target.name + ' 已进入待复核', 'success');
+      renderGrading();
+    };
+    gradingTimers[id] = setInterval(() => {
+      const latest = gradingItem(id);
+      if (!latest) { clearInterval(gradingTimers[id]); delete gradingTimers[id]; return; }
+      latest.item.progress = Math.min(92, Math.round(12 + (Date.now() - started) / 1200 * 80));
+      latest.item.note = latest.item.progress < 55 ? '正在整理识别结果' : '正在生成批改建议';
+      const progressEl = $$('[data-g-progress]').find(el => String(el.dataset.gProgress) === String(id));
+      const noteEl = $$('[data-g-note]').find(el => String(el.dataset.gNote) === String(id));
+      if (progressEl) progressEl.style.width = latest.item.progress + '%';
+      if (noteEl) noteEl.textContent = latest.item.note + ' · ' + latest.item.progress + '%';
+      DB.saveCollection('grading');
+      if (latest.item.progress >= 92) {
+        clearInterval(gradingTimers[id]);
+        finish();
+      }
+    }, 240);
+    renderGrading();
+  }
+  function savePublishedFeedback(item, explanations) {
+    if (!item) return;
+    item.published = true;
+    item.publishedAt = DB.now();
+    item.feedback = { score: item.score, total: item.total || 100, comment: item.comment || '', explanations: explanations || [] };
+    DB.saveCollection('grading');
+    const users = DB.collection('users') || [];
+    const student = users.find(u => (item.studentId && String(u.id) === String(item.studentId)) || (item.studentPhone && String(u.phone) === String(item.studentPhone)) || (item.name && u.name === item.name));
+    if (student) {
+      student.submissions = Array.isArray(student.submissions) ? student.submissions : [];
+      const old = student.submissions.find(s => String(s.gradingId) === String(item.id));
+      const feedback = { gradingId: item.id, task: item.task, score: item.score, total: item.total || 100, comment: item.comment || '', explanations: explanations || [], publishedAt: item.publishedAt };
+      if (old) Object.assign(old, feedback); else student.submissions.unshift(feedback);
+      DB.saveCollection('users');
+    }
   }
 
   const GRADE_TEXT = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
@@ -2583,98 +2686,142 @@
   /* ---------- 批改中心 ---------- */
   function renderGrading() {
     const q = state.query.tab || 'all';
+    const keyword = String(state.query.q || '').trim().toLowerCase();
+    const sort = state.query.sort || 'newest';
+    const isStudent = state.role === 'student';
     const G = DB.grading();
-    const groups = [
+    const rawGroups = [
       { key: 'recognized', label: '已识别', dot: 'blue', icon: 'upload', items: G.recognized || [] },
       { key: 'grading', label: '批改中', dot: 'blue', icon: 'clock', items: G.grading || [] },
       { key: 'review', label: '待复核', dot: 'gold', icon: 'review', items: G.review || [] },
       { key: 'done', label: '已完成', dot: 'green', icon: 'done', items: G.done || [] }
     ];
+    const groups = isStudent ? [Object.assign({}, rawGroups[3], { items: rawGroups[3].items.filter(item => item.published || item.feedback) })] : rawGroups;
     const tabs = [{ key: 'all', label: '全部' }].concat(groups.map(g => ({ key: g.key, label: g.label })));
     const total = groups.reduce((s, g) => s + g.items.length, 0);
+    const reviewN = (G.review || []).length;
+    const doneN = (G.done || []).length;
+    const route = (tab, nextKeyword, nextSort) => {
+      const params = [];
+      if (tab && tab !== 'all') params.push('tab=' + encodeURIComponent(tab));
+      if (nextKeyword) params.push('q=' + encodeURIComponent(nextKeyword));
+      if (nextSort && nextSort !== 'newest') params.push('sort=' + encodeURIComponent(nextSort));
+      return '#/grading' + (params.length ? '?' + params.join('&') : '');
+    };
+    const visibleItems = group => group.items.filter(item => {
+      if (!keyword) return true;
+      return [item.name, item.cls, item.task, item.fileName, item.note].filter(Boolean).join(' ').toLowerCase().includes(keyword);
+    }).sort((a, b) => {
+      if (sort === 'score') return Number(b.score || 0) - Number(a.score || 0);
+      if (sort === 'low') return Number(!!b.low) - Number(!!a.low);
+      return String(b.startedAt || b.createdAt || b.time || '').localeCompare(String(a.startedAt || a.createdAt || a.time || ''));
+    });
+    const shownTotal = groups.reduce((s, g) => s + visibleItems(g).length, 0);
+    const upload = isStudent
+      ? '<div class="grading-student-hint"><div><b>这里是你的批改反馈</b><span>老师发布成绩后，反馈和学生版详解会出现在已完成记录中。</span></div><button class="btn btn-outline btn-sm" data-nav="#/knowledge">去看知识点</button></div>'
+      : '<div class="upload-zone" id="upload-zone"><div class="uz-icon">' + icon('upload', 34) + '</div><div class="uz-title">拖拽答卷到这里，或点击选择文件</div><div class="uz-sub">支持拍照 / PDF / 图片，多文件排队 · 识别失败会提示重拍</div><span class="upload-zone__rule">上传后先核对识别结果，再开始批改</span></div>';
+    const filteredGroups = groups.filter(g => q === 'all' || q === g.key);
     const html =
-      '<div class="page"><div class="page-head"><div><h1 class="page-title">批改中心</h1><p class="page-sub">上传答卷 → OCR 识别 → AI 预批改 → 人工复核</p></div>' +
-      '<div><span class="tag tag-blue" style="margin-right:8px">队列共 ' + total + ' 份</span><span class="tag tag-gold">待复核 ' + (G.review || []).length + ' 份</span></div></div>' +
-      '<div class="upload-zone" id="upload-zone">' +
-      '<div class="uz-icon">' + icon('upload', 34) + '</div>' +
-      '<div class="uz-title">拖拽答卷到这里，或点击选择文件</div>' +
-      '<div class="uz-sub">支持拍照 / PDF / 图片，多文件排队 · 识别失败会提示重拍</div></div>' +
-      '<div class="tabs" style="margin-top:18px;border:1px solid var(--border);border-radius:8px;background:#fff;width:fit-content">' +
-      tabs.map(t => '<button class="tab-btn' + (q === t.key ? ' active' : '') + '" data-gtab="' + t.key + '">' + esc(t.label) + '<span class="side-count" style="margin-left:6px">' + (t.key === 'all' ? total : groups.find(g => g.key === t.key).items.length) + '</span></button>').join('') +
-      '</div>' +
-      '<div class="queue-groups" style="margin-top:16px">' +
-      groups.filter(g => q === 'all' || q === g.key).map(g =>
-        '<div><div class="queue-group-title"><span class="status-dot ' + g.dot + '"></span>' + esc(g.label) +
-        '<span class="tag tag-gray" style="font-weight:500">' + g.items.length + ' 份</span></div>' +
-        (g.items.length
-          ? '<div class="queue-cards">' + g.items.map(queueCard).join('') + '</div>'
-          : '<div class="card"><div class="empty-state" style="padding:16px"><div class="es-icon">' + icon('check', 26) + '</div><div>暂无' + esc(g.label) + '任务</div></div></div>') +
-        '</div>'
-      ).join('') +
-      '</div></div>';
+      '<div class="page"><div class="page-head"><div><h1 class="page-title">' + (isStudent ? '批改反馈' : '批改中心') + '</h1><p class="page-sub">' + (isStudent ? '查看已发布成绩、教师评语与逐题答案详解' : '上传答卷 → 识别核对 → AI 预批改 → 人工复核 → 发布反馈') + '</p></div>' +
+      '<div class="grading-head-actions">' + (isStudent ? '' : '<button class="btn btn-outline" data-nav="#/grading/rubric">' + icon('rubric', 15) + '评分标准</button>') + '<span class="tag tag-blue">队列 ' + total + ' 份</span><span class="tag tag-gold">待复核 ' + reviewN + ' 份</span></div></div>' +
+      '<div class="grading-summary"><div><span>待处理</span><strong>' + ((G.recognized || []).length + (G.grading || []).length) + '</strong><small>识别与批改中</small></div><div><span>待复核</span><strong>' + reviewN + '</strong><small>需要教师确认</small></div><div><span>已完成</span><strong>' + doneN + '</strong><small>可发布或查看</small></div><div><span>当前筛选</span><strong>' + shownTotal + '</strong><small>' + (keyword ? '匹配记录' : '全部记录') + '</small></div></div>' +
+      upload +
+      '<div class="grading-toolbar"><div class="grading-search"><span>' + icon('search', 15) + '</span><input class="input" id="grading-search" value="' + esc(state.query.q || '') + '" placeholder="搜索姓名、班级、任务或文件名"></div><select class="select" id="grading-sort"><option value="newest"' + (sort === 'newest' ? ' selected' : '') + '>最近更新</option><option value="low"' + (sort === 'low' ? ' selected' : '') + '>优先低置信度</option><option value="score"' + (sort === 'score' ? ' selected' : '') + '>按分数高低</option></select><button class="btn btn-ghost" id="grading-clear">清除筛选</button></div>' +
+      '<div class="tabs grading-tabs">' + tabs.map(t => '<button class="tab-btn' + (q === t.key ? ' active' : '') + '" data-gtab="' + t.key + '">' + esc(t.label) + '<span class="side-count" style="margin-left:6px">' + (t.key === 'all' ? total : groups.find(g => g.key === t.key).items.length) + '</span></button>').join('') + '</div>' +
+      '<div class="grading-batchbar hidden" id="grading-batchbar"><span><b id="grading-selected-count">0</b> 份已选</span><button class="btn btn-primary btn-sm" data-g-batch-start>' + icon('grading', 14) + '批量开始批改</button><button class="btn btn-ghost btn-sm" data-g-batch-clear>取消选择</button></div>' +
+      '<div class="queue-groups grading-queue">' + filteredGroups.map(g => {
+        const items = visibleItems(g);
+        return '<section class="grading-group"><div class="queue-group-title"><span class="status-dot ' + g.dot + '"></span>' + esc(g.label) + '<span class="tag tag-gray" style="font-weight:500">' + items.length + (keyword ? ' / ' + g.items.length : '') + ' 份</span></div>' + (items.length ? '<div class="queue-cards">' + items.map(item => queueCard(item, isStudent, g.key)).join('') + '</div>' : '<div class="card"><div class="empty-state" style="padding:16px"><div class="es-icon">' + icon(g.key === 'done' ? 'check' : 'search', 26) + '</div><div>' + (keyword ? '没有匹配的答卷' : '暂无' + esc(g.label) + '任务') + '</div></div></div>') + '</section>';
+      }).join('') + '</div></div>';
     renderPage(html);
 
-    /* 真实上传：选择文件 / 拖拽 → 识别进度 → 加入队列（持久化） */
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'image/*,.pdf';
-    fileInput.multiple = true;
-    fileInput.style.display = 'none';
-    document.body.appendChild(fileInput);
-    const startUpload = (files) => {
-      const list = Array.from(files || []).filter(f => /image\/|\.pdf$/i.test(f.type + f.name));
-      const count = Math.max(1, list.length || 1);
-      $('#upload-zone').innerHTML = '<div class="uz-icon" style="color:var(--primary)">' + icon('upload', 30) + '</div>' +
-        '<div class="uz-title">正在上传并识别 ' + count + ' 份答卷…</div>' +
-        '<div class="progress" style="max-width:280px;margin:10px auto 0"><div class="fill" style="width:8%"></div></div>';
-      const startedAt = Date.now();
-      const duration = 1200;
-      const t = setInterval(() => {
-        const p = Math.min(100, 8 + (Date.now() - startedAt) / duration * 92);
-        const f = $('#upload-zone .fill');
-        if (f) f.style.width = p + '%';
-        if (p >= 100) {
-          clearInterval(t);
-          list.forEach((file, idx) => {
-            const name = file.name ? file.name.replace(/\.[^.]+$/, '') : '新上传答卷';
-            DB.addGradingItem({
-              name: name, cls: '未分班', task: '新上传答卷', time: '刚刚',
-              status: 'recognized', note: '已识别，等待批改', progress: 0
+    const fileBefore = $('#grading-file-input');
+    if (fileBefore) fileBefore.remove();
+    if (!isStudent) {
+      const fileInput = document.createElement('input');
+      fileInput.id = 'grading-file-input';
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*,.pdf';
+      fileInput.multiple = true;
+      fileInput.style.display = 'none';
+      document.body.appendChild(fileInput);
+      const startUpload = (files) => {
+        const list = Array.from(files || []).filter(f => /image\//i.test(f.type) || /\.pdf$/i.test(f.name || ''));
+        if (!list.length) { showToast('没有识别到可用的图片或 PDF 文件', 'error'); return; }
+        const count = list.length;
+        $('#upload-zone').innerHTML = '<div class="uz-icon" style="color:var(--primary)">' + icon('upload', 30) + '</div><div class="uz-title">正在上传并识别 ' + count + ' 份答卷…</div><div class="progress" style="max-width:280px;margin:10px auto 0"><div class="fill" style="width:8%"></div></div><span class="upload-zone__rule">完成后会进入“已识别”，请先核对再开始批改</span>';
+        const startedAt = Date.now();
+        const t = setInterval(() => {
+          const p = Math.min(100, 8 + (Date.now() - startedAt) / 1200 * 92);
+          const f = $('#upload-zone .fill');
+          if (f) f.style.width = p + '%';
+          if (p >= 100) {
+            clearInterval(t);
+            list.forEach(file => {
+              const name = (file.name || '新上传答卷').replace(/\.[^.]+$/, '');
+              DB.addGradingItem({ name: name, fileName: file.name || '', fileSize: file.size || 0, cls: '未分班', task: '新上传答卷', time: '刚刚', createdAt: DB.now(), status: 'recognized', note: '已识别，等待教师核对后开始批改', progress: 0, total: 100, answers: [{ no: 1, title: '待核对题目', text: '已上传文件，识别文本待教师核对。' }] });
             });
-          });
-          DB.auditLog('上传答卷', '上传 ' + count + ' 份答卷进入识别队列', state.user && state.user.name);
-          showToast('已识别 ' + count + ' 份答卷，进入批改队列', 'success');
-          renderGrading();
-        }
-      }, 300);
+            DB.auditLog('上传答卷', '上传 ' + count + ' 份答卷进入识别队列', state.user && state.user.name);
+            showToast('已识别 ' + count + ' 份答卷，进入批改队列', 'success');
+            renderGrading();
+          }
+        }, 240);
+      };
+      $('#upload-zone').onclick = e => { if (!e.target.closest('button')) fileInput.click(); };
+      fileInput.onchange = () => { if (fileInput.files && fileInput.files.length) startUpload(fileInput.files); fileInput.value = ''; };
+      ['dragenter', 'dragover'].forEach(ev => $('#upload-zone').addEventListener(ev, e => { e.preventDefault(); $('#upload-zone').classList.add('drag'); }));
+      ['dragleave', 'drop'].forEach(ev => $('#upload-zone').addEventListener(ev, e => { e.preventDefault(); $('#upload-zone').classList.remove('drag'); if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files) startUpload(e.dataTransfer.files); }));
+    }
+    $$('[data-gtab]').forEach(b => b.onclick = () => nav(route(b.dataset.gtab, state.query.q || '', sort)));
+    $('#grading-search').onkeydown = e => { if (e.key === 'Enter') nav(route(q, e.currentTarget.value.trim(), sort)); };
+    $('#grading-sort').onchange = e => nav(route(q, state.query.q || '', e.currentTarget.value));
+    $('#grading-clear').onclick = () => nav(route(q, '', 'newest'));
+    const selected = new Set();
+    const syncSelection = () => {
+      const bar = $('#grading-batchbar');
+      const count = $('#grading-selected-count');
+      if (bar) bar.classList.toggle('hidden', !selected.size);
+      if (count) count.textContent = selected.size;
     };
-    $('#upload-zone').onclick = () => fileInput.click();
-    fileInput.onchange = () => {
-      if (fileInput.files && fileInput.files.length) startUpload(fileInput.files);
-      fileInput.value = '';
-    };
-    ['dragover', 'drop'].forEach(ev => $('#upload-zone').addEventListener(ev, e => {
-      e.preventDefault();
-      if (ev === 'drop' && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) startUpload(e.dataTransfer.files);
-    }));
-    $$('[data-gtab]').forEach(b => b.onclick = () => nav('#/grading' + (b.dataset.gtab === 'all' ? '' : '?tab=' + b.dataset.gtab)));
-    $$('.queue-card').forEach(c => c.onclick = () => nav('#/grading/' + c.dataset.gid));
+    $$('[data-g-select]').forEach(input => input.onchange = e => { if (e.currentTarget.checked) selected.add(e.currentTarget.dataset.gSelect); else selected.delete(e.currentTarget.dataset.gSelect); syncSelection(); });
+    $$('[data-g-open]').forEach(button => button.onclick = e => { e.stopPropagation(); nav('#/grading/' + button.dataset.gOpen); });
+    $$('[data-g-start]').forEach(button => button.onclick = e => { e.stopPropagation(); startGradingItem(button.dataset.gStart); });
+    $$('[data-g-remove]').forEach(button => button.onclick = e => {
+      e.stopPropagation();
+      const found = gradingItem(button.dataset.gRemove);
+      if (!found) return;
+      confirmDialog({ title: '移除答卷', body: '确定从当前批改队列移除“' + esc(found.item.name) + '”吗？此操作会写入审计日志。', danger: true, okText: '移除', onConfirm: () => { removeGradingItem(button.dataset.gRemove); DB.auditLog('移除答卷', found.item.name, state.user && state.user.name); showToast('答卷已从队列移除', 'success'); renderGrading(); } });
+    });
+    $$('.queue-card').forEach(card => {
+      card.onclick = e => { if (e.target.closest('button,input,label')) return; nav('#/grading/' + card.dataset.gid); };
+      card.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav('#/grading/' + card.dataset.gid); } };
+    });
+    const batchStart = $('[data-g-batch-start]');
+    if (batchStart) batchStart.onclick = () => { const ids = Array.from(selected); if (!ids.length) return; ids.forEach((id, index) => setTimeout(() => startGradingItem(id), index * 180)); showToast('已开始处理 ' + ids.length + ' 份答卷', 'info'); };
+    const batchClear = $('[data-g-batch-clear]');
+    if (batchClear) batchClear.onclick = () => { selected.clear(); $$('[data-g-select]').forEach(x => { x.checked = false; }); syncSelection(); };
   }
 
-  function queueCard(item) {
-    const statusTag = item.status === 'review'
-      ? '<span class="tag tag-gold">' + (item.low ? '<span class="status-dot red"></span>低置信度' : icon('review', 12) + '待复核') + '</span>'
-      : item.status === 'done' ? '<span class="tag tag-green">' + icon('check', 12) + item.score + ' 分</span>'
-      : item.status === 'grading' ? '<span class="tag tag-blue">' + icon('clock', 12) + '批改中</span>'
+  function queueCard(item, isStudent, queueKey) {
+    const scoreText = item.score == null ? '待评分' : String(item.score) + '/' + (item.total || 100);
+    const statusTag = queueKey === 'review'
+      ? '<span class="tag tag-gold">' + (item.low ? '<span class="status-dot red"></span>低置信度' : (item.score == null ? '待人工评分' : icon('review', 12) + '待复核')) + '</span>'
+      : queueKey === 'done' ? '<span class="tag tag-green">' + icon('check', 12) + scoreText + '</span>'
+      : queueKey === 'grading' ? '<span class="tag tag-blue">' + icon('clock', 12) + '批改中</span>'
       : '<span class="tag tag-blue">' + icon('check', 12) + '已识别</span>';
-    return '<div class="queue-card" data-gid="' + item.id + '">' +
-      '<div class="thumb">' + icon('doc', 22) + ' 答卷预览</div>' +
-      '<div class="qc-name">' + esc(item.name) + '</div>' +
-      '<div class="qc-meta">' + esc(item.cls) + ' · ' + esc(item.task) + '</div>' +
-      '<div class="qc-foot"><span class="qc-meta" style="margin:0">' + item.time + '</span>' + statusTag + '</div>' +
-      (item.progress ? '<div class="progress"><div class="fill" style="width:' + item.progress + '%"></div></div>' : '') +
-      (item.low ? '<div class="qc-meta" style="color:var(--red)">识别置信度较低，建议人工核对</div>' : '') +
-      '</div>';
+    const action = isStudent
+      ? '<button class="btn btn-ghost btn-sm" data-g-open="' + esc(item.id) + '">查看反馈</button>'
+      : queueKey === 'recognized' ? '<button class="btn btn-primary btn-sm" data-g-start="' + esc(item.id) + '">开始批改</button>'
+        : queueKey === 'grading' ? '<button class="btn btn-outline btn-sm" data-g-start="' + esc(item.id) + '">继续处理</button>'
+          : queueKey === 'review' ? '<button class="btn btn-primary btn-sm" data-g-open="' + esc(item.id) + '">开始复核</button>'
+            : '<button class="btn btn-outline btn-sm" data-g-open="' + esc(item.id) + '">查看结果</button>';
+    return '<article class="queue-card" data-gid="' + esc(item.id) + '" tabindex="0" role="button" aria-label="打开 ' + esc(item.name) + '">' +
+      '<div class="queue-card__top">' + (!isStudent ? '<label class="queue-select" title="选择答卷"><input type="checkbox" data-g-select="' + esc(item.id) + '"><span></span></label>' : '') + '<div class="thumb">' + icon('doc', 22) + '<span>答卷预览</span></div>' + statusTag + '</div>' +
+      '<div class="qc-name">' + esc(item.name || '未命名答卷') + '</div><div class="qc-meta">' + esc(item.cls || '未分班') + ' · ' + esc(item.task || '待分配任务') + '</div>' +
+      '<div class="qc-foot"><span class="qc-meta" style="margin:0">' + esc(item.time || '刚刚') + (item.fileName ? ' · ' + esc(item.fileName) : '') + '</span>' + (item.low ? '<span class="qc-warning">需核对</span>' : '') + '</div>' +
+      (item.progress && queueKey === 'grading' ? '<div class="progress"><div class="fill" data-g-progress="' + esc(item.id) + '" style="width:' + Number(item.progress) + '%"></div></div><div class="qc-meta" data-g-note="' + esc(item.id) + '">' + esc(item.note || '处理中') + ' · ' + Number(item.progress) + '%</div>' : '') +
+      (item.low ? '<div class="qc-meta qc-low-note">识别置信度较低，建议人工核对</div>' : '') +
+      '<div class="qc-actions">' + action + (!isStudent ? '<button class="btn btn-ghost btn-sm qc-remove" data-g-remove="' + esc(item.id) + '">移除</button>' : '') + '</div></article>';
   }
 
   function explainCard(e) {
@@ -2686,20 +2833,26 @@
   /* ---------- 批改结果 ---------- */
   function renderGradingDetail() {
     const id = state.route.split('/')[2];
+    const isStudent = state.role === 'student';
     const G = DB.grading();
     const src = [].concat(G.review || [], G.done || [], G.recognized || [], G.grading || []).find(x => String(x.id) === String(id));
     if (!src) { renderPage(placeholder('批改记录不存在', '返回批改中心重新选择')); return; }
+    if (isStudent && !src.published && !src.feedback) {
+      renderPage(placeholder('反馈还未发布', '老师发布成绩后，这里会显示分数、评语与答案详解'));
+      return;
+    }
     let d = Object.assign({}, src, {
       id: id,
       submitTime: src.submitTime || (src.time === '刚刚' ? '刚刚' : '2026-' + (src.time || '')),
-      total: src.total || 100,
-      aiScore: src.score || 0,
-      confidence: src.low ? '低置信度' : '正常',
-      comment: src.comment || 'AI 预批改完成，请教师复核后发布。',
-      reasons: src.reasons || [
+      total: src.total || (src.feedback && src.feedback.total) || 100,
+      score: src.score != null ? src.score : (src.feedback && src.feedback.score != null ? src.feedback.score : 0),
+      aiScore: src.score != null ? src.score : (src.feedback && src.feedback.score) || 0,
+      confidence: src.low ? '低置信度' : (src.score == null ? '待人工评分' : '正常'),
+      comment: src.comment || (src.feedback && src.feedback.comment) || 'AI 预批改完成，请教师复核后发布。',
+      reasons: Array.isArray(src.reasons) ? src.reasons : [
         { type: 'good', text: '答卷已识别，等待人工复核后发布。' }
       ],
-      audit: src.audit || [
+      audit: Array.isArray(src.audit) ? src.audit : [
         { time: src.time || '—', op: 'AI 批改完成，初始评分 ' + (src.score || 0) + '/' + (src.total || 100) + '（置信度 ' + (src.low ? '72%' : '89%') + '）' }
       ],
       answers: src.answers || [
@@ -2709,23 +2862,42 @@
     state.gradingAI = state.gradingAI || {};
     state.gradingExplain = state.gradingExplain || {};
     state.gradingExplainAllowed = state.gradingExplainAllowed || {};
+    if (isStudent && src.feedback && Array.isArray(src.feedback.explanations)) {
+      state.gradingExplain[id] = src.feedback.explanations;
+    }
     const aiResult = state.gradingAI[id];
-    if (aiResult) {
-      d.score = aiResult.score;
+    if (aiResult && Number.isFinite(Number(aiResult.score))) {
+      d.score = Number(aiResult.score);
       d.aiScore = aiResult.score;
-      d.comment = aiResult.comment;
-      d.reasons = aiResult.reasons;
+      d.comment = aiResult.comment || d.comment;
+      d.reasons = Array.isArray(aiResult.reasons) ? aiResult.reasons : [];
       d.confidence = '免费模型';
     }
-    const explList = state.gradingExplain[id] || [];
-    const explAllowed = !!state.gradingExplainAllowed[id];
+    const explList = state.gradingExplain[id] || (Array.isArray(src.explanations) ? src.explanations : []);
+    const explAllowed = state.gradingExplainAllowed[id] != null ? !!state.gradingExplainAllowed[id] : !!src.explainAllowed;
+    const scoreReady = src.score != null || (aiResult && Number.isFinite(Number(aiResult.score)));
     const pct = Math.round(d.score / d.total * 100);
+    const detailHeadActions = isStudent
+      ? '<button class="btn btn-outline" id="export-score">' + icon('export', 15) + '导出成绩单</button>'
+      : '<button class="btn btn-outline" id="export-score">' + icon('export', 15) + '导出成绩单</button><button class="btn btn-primary" id="publish-score">' + icon('publish', 15) + '发布成绩</button>';
+    const explainActions = isStudent
+      ? '<span class="tag tag-green">已发布 · 学生可见</span>'
+      : '<button class="btn btn-primary btn-sm" id="gen-explain">' + icon('spark', 13) + 'AI 生成详解</button><label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-2);cursor:pointer"><button class="switch' + (explAllowed ? ' on' : '') + '" id="allow-explain"></button>允许学生端查看</label><span class="tag tag-gray" id="explain-status">' + (explList.length ? '已生成 ' + explList.length + ' 题' : '未生成') + '</span>';
+    const explainHint = isStudent
+      ? '<p class="form-hint" style="margin-top:8px">以下详解由教师发布，按题目查看知识点、解题思路与易错点。</p>'
+      : '<p class="form-hint" style="margin-top:8px">详解含知识点回顾、解题思路、逐步解答、易错点与变式；勾选「允许学生端查看」后，随成绩发布一并下发给学生 / 家长端。</p>';
+    const reviewPanel = isStudent ? '' :
+      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">人工复核</span><span class="tag tag-gray">修正留痕</span></div>' +
+      '<div style="padding:16px"><div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:10px"><div class="field" style="margin:0;width:110px"><label>修正评分</label><input class="input" id="fix-score" type="number" min="0" max="' + d.total + '" value="' + d.score + '"></div>' +
+      '<div class="field" style="margin:0;flex:1"><label>修正评语（可选）</label><textarea class="textarea" id="fix-comment" style="min-height:40px">' + esc(d.comment) + '</textarea></div></div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:4px"><button class="btn btn-primary" id="save-fix">' + icon('check', 15) + '保存修正</button><button class="btn btn-ghost" id="confirm-all">全部确认</button></div>' +
+      '<p class="form-hint">保存后写入审计日志；低分 / 异常卷会标记为已复核。</p><div class="divider"></div><div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px">审计日志</div>' +
+      '<div class="audit-list">' + d.audit.map(a => '<div class="audit-item"><span class="time">' + esc(a.time || '') + '</span><span class="op">' + esc(String(a.op || '').replace(/<[^>]+>/g, '')) + '</span></div>').join('') + '</div></div></div>';
     const html =
       '<div class="page">' + crumb([{ label: '批改中心', route: '#/grading' }, { label: '批改结果' }]) +
       '<div class="page-head"><div><h1 class="page-title">' + esc(d.name) + ' · 批改结果</h1>' +
-      '<p class="page-sub">' + esc(d.cls) + ' · ' + esc(d.task) + ' · 提交于 ' + d.submitTime + '</p></div>' +
-      '<div style="display:flex;gap:8px"><button class="btn btn-outline" id="export-score">' + icon('export', 15) + '导出成绩单</button>' +
-      '<button class="btn btn-primary" id="publish-score">' + icon('publish', 15) + '发布成绩</button></div></div>' +
+      '<p class="page-sub">' + esc(d.cls) + ' · ' + esc(d.task) + ' · 提交于 ' + esc(d.submitTime) + '</p></div>' +
+      '<div style="display:flex;gap:8px">' + detailHeadActions + '</div></div>' +
       '<div class="grading-detail">' +
       /* 左：原始答卷 */
       '<div class="card" style="padding:14px">' +
@@ -2737,7 +2909,7 @@
       '<div class="sheet-head"><span>七（2）班 · 数学周测</span><span>姓名：' + esc(d.name) + '　学号：12</span></div>' +
       d.answers.map(a =>
         '<div class="sheet-q"><div class="sq-title">' + a.no + '. ' + esc(a.title) + '（' + (a.no === 6 || a.no === 8 ? 4 : 3) + ' 分）</div>' +
-        '<div class="handwrite">' + a.text + '</div></div>'
+        '<div class="handwrite">' + esc(a.text || '').replace(/\n/g, '<br>') + '</div></div>'
       ).join('') +
       '<div style="position:absolute;bottom:18px;right:20px;font-size:11px;color:var(--text-3)">图像经脱敏处理 · 展示用模拟答卷</div>' +
       '</div></div>' +
@@ -2745,7 +2917,7 @@
       '<div class="paper-col">' +
       '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">AI 批改结果</span>' +
       '<div style="display:flex;gap:6px;align-items:center"><span class="tag tag-gold">' + esc(d.confidence) + '</span>' +
-      '<button class="btn btn-outline btn-sm" id="ai-reanalyze">' + icon('spark', 13) + 'AI 重新分析</button></div></div>' +
+      (isStudent ? '<span class="tag tag-green">已发布反馈</span>' : '<button class="btn btn-outline btn-sm" id="ai-reanalyze">' + icon('spark', 13) + 'AI 重新分析</button>') + '</div></div>' +
       '<div style="padding:16px">' +
       '<div id="ai-body">' +
       '<div class="score-hero">' +
@@ -2766,29 +2938,11 @@
         : '') +
       '</div></div>' +
       /* 学生版答案详解（老师端允许后下发） */
-      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">学生版答案详解</span><span class="tag tag-gold">下发需老师允许</span></div>' +
+      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">学生版答案详解</span><span class="tag ' + (isStudent ? 'tag-green' : 'tag-gold') + '">' + (isStudent ? '教师已发布' : '下发需老师允许') + '</span></div>' +
       '<div style="padding:14px">' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' +
-      '<button class="btn btn-primary btn-sm" id="gen-explain">' + icon('spark', 13) + 'AI 生成详解</button>' +
-      '<label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-2);cursor:pointer">' +
-      '<button class="switch' + (explAllowed ? ' on' : '') + '" id="allow-explain"></button>允许学生端查看</label>' +
-      '<span class="tag tag-gray" id="explain-status">' + (explList.length ? '已生成 ' + explList.length + ' 题' : '未生成') + '</span></div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' + explainActions + '</div>' +
       '<div id="explain-preview">' + (explList.length ? explList.map(explainCard).join('') : '<div class="empty-state" style="padding:14px">' + icon('doc', 24) + '<div>尚未生成详解；AI 会从知识点开始逐题讲解</div></div>') + '</div>' +
-      '<p class="form-hint" style="margin-top:8px">详解含知识点回顾、解题思路、逐步解答、易错点与变式；勾选「允许学生端查看」后，随成绩发布一并下发给学生 / 家长端。</p>' +
-      '</div></div>' +
-      '<div class="col-panel"><div class="col-panel-head"><span class="section-title" style="font-size:15px">人工复核</span><span class="tag tag-gray">修正留痕</span></div>' +
-      '<div style="padding:16px">' +
-      '<div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:10px">' +
-      '<div class="field" style="margin:0;width:110px"><label>修正评分</label><input class="input" id="fix-score" type="number" min="0" max="' + d.total + '" value="' + d.score + '"></div>' +
-      '<div class="field" style="margin:0;flex:1"><label>修正评语（可选）</label><textarea class="textarea" id="fix-comment" style="min-height:40px">' + esc(d.comment) + '</textarea></div></div>' +
-      '<div style="display:flex;gap:8px;margin-bottom:4px">' +
-      '<button class="btn btn-primary" id="save-fix">' + icon('check', 15) + '保存修正</button>' +
-      '<button class="btn btn-ghost" id="confirm-all">全部确认</button></div>' +
-      '<p class="form-hint">保存后写入审计日志；低分 / 异常卷会标记为已复核。</p>' +
-      '<div class="divider"></div>' +
-      '<div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px">审计日志</div>' +
-      '<div class="audit-list">' + d.audit.map(a => '<div class="audit-item"><span class="time">' + a.time + '</span><span class="op">' + a.op + '</span></div>').join('') + '</div>' +
-      '</div></div></div>' +
+      explainHint + '</div></div>' + reviewPanel +
       '</div></div>';
     renderPage(html);
 
@@ -2808,8 +2962,16 @@
         '<p class="form-hint">正在调用 ' + esc(window.AI.providerLabel()) + ' 生成评分、评语与错因…（首次约 10–40 秒）</p>';
       try {
         const res = await window.AI.gradeAnswer({ task: d.task, total: d.total, answers: d.answers });
-        const score = Math.max(0, Math.min(d.total, Math.round(res.score)));
+        const rawScore = Number(res && res.score);
+        if (!Number.isFinite(rawScore)) throw new Error('模型未返回有效分数，请重试');
+        const score = Math.max(0, Math.min(d.total, Math.round(rawScore)));
         state.gradingAI[id] = { score: score, comment: res.comment, reasons: res.reasons };
+        const savedItem = gradingItem(id);
+        if (savedItem) {
+          Object.assign(savedItem.item, { score: score, comment: res.comment || d.comment, reasons: Array.isArray(res.reasons) ? res.reasons : [], confidence: 'AI 已生成，待教师复核' });
+          savedItem.item.audit = d.audit;
+          DB.saveCollection('grading');
+        }
         const t = new Date();
         const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
         d.audit.push({ time: hh, op: '<b>AI（' + esc(window.AI.providerLabel()) + '）</b> 重新分析：评分 ' + d.score + ' → ' + score });
@@ -2822,8 +2984,9 @@
         if (state.gradingAI[id]) renderGradingDetail();
       }
     };
-    if (window.AI) {
-      $('#ai-reanalyze').onclick = aiReanalyze;
+    if (window.AI && !isStudent) {
+      const reanalyzeButton = $('#ai-reanalyze');
+      if (reanalyzeButton) reanalyzeButton.onclick = aiReanalyze;
       if (window.AI.isConfigured() && !state.aiTried[id]) {
         state.aiTried[id] = true;
         aiReanalyze();
@@ -2831,7 +2994,7 @@
     }
 
     /* 学生版详解：生成 + 老师端允许 */
-    $('#gen-explain').onclick = async () => {
+    if (!isStudent) $('#gen-explain').onclick = async () => {
       const btn = $('#gen-explain');
       const preview = $('#explain-preview');
       btn.disabled = true;
@@ -2858,24 +3021,28 @@
         return;
       }
       state.gradingExplain[id] = expl;
+      const savedItem = gradingItem(id);
+      if (savedItem) { savedItem.item.explanations = expl; DB.saveCollection('grading'); }
       preview.innerHTML = expl.map(explainCard).join('');
       $('#explain-status').textContent = '已生成 ' + expl.length + ' 题（' + window.AI.providerLabel() + '）';
       btn.disabled = false;
       btn.innerHTML = icon('spark', 13) + 'AI 生成详解';
       showToast('已实时生成 ' + expl.length + ' 题详解，勾选允许后随成绩下发', 'success');
     };
-    $('#allow-explain').onclick = () => {
+    if (!isStudent) $('#allow-explain').onclick = () => {
+      const next = !$('#allow-explain').classList.contains('on');
+      if (next && !state.gradingExplain[id]) { showToast('请先生成详解，再允许学生端查看', 'info'); return; }
       const on = $('#allow-explain').classList.toggle('on');
       state.gradingExplainAllowed[id] = on;
-      if (on && !state.gradingExplain[id]) {
-        showToast('请先生成详解', 'info');
-      }
+      const savedItem = gradingItem(id);
+      if (savedItem) { savedItem.item.explainAllowed = on; DB.saveCollection('grading'); }
     };
 
-    $('#save-fix').onclick = () => {
+    if (!isStudent) $('#save-fix').onclick = () => {
       const val = Math.max(0, Math.min(d.total, Number($('#fix-score').value) || 0));
       const old = d.score;
       d.score = val;
+      d.comment = $('#fix-comment') ? $('#fix-comment').value : d.comment;
       const t = new Date();
       const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
       const diff = val === old ? '评分不变' : '评分 ' + old + ' → ' + val;
@@ -2884,7 +3051,7 @@
       const item = [].concat(G.review || [], G.done || [], G.recognized || [], G.grading || []).find(x => String(x.id) === String(id));
       if (item) {
         item.score = val;
-        item.comment = $('#fix-comment') ? $('#fix-comment').value : d.comment;
+        item.comment = d.comment;
         item.audit = d.audit;
         item.low = false;
         DB.saveCollection('grading');
@@ -2893,7 +3060,8 @@
       showToast('修正已保存并留痕', 'success');
       renderGradingDetail();
     };
-    $('#confirm-all').onclick = () => {
+    if (!isStudent) $('#confirm-all').onclick = () => {
+      if (!scoreReady) { showToast('请先保存人工评分，或完成 AI 重新分析', 'info'); $('#fix-score').focus(); return; }
       const G = DB.grading();
       const fromKey = (G.review || []).some(x => String(x.id) === String(id)) ? 'review'
         : (G.grading || []).some(x => String(x.id) === String(id)) ? 'grading'
@@ -2903,7 +3071,9 @@
       showToast('已全部确认，该答卷进入「已完成」', 'success');
       setTimeout(() => nav('#/grading'), 600);
     };
-    $('#publish-score').onclick = () => confirmDialog({
+    if (!isStudent) $('#publish-score').onclick = () => {
+      if (!scoreReady) { showToast('当前还没有可发布的有效评分，请先完成复核', 'info'); $('#fix-score').focus(); return; }
+      confirmDialog({
       title: '发布成绩',
       body: '将 ' + esc(d.name) + ' 的成绩与批改反馈发布给学生（家长端按设置可见）？' +
         (state.gradingExplain[id] && state.gradingExplain[id].length
@@ -2918,12 +3088,14 @@
         const fromKey = (G.review || []).some(x => String(x.id) === String(id)) ? 'review'
           : (G.grading || []).some(x => String(x.id) === String(id)) ? 'grading'
           : (G.recognized || []).some(x => String(x.id) === String(id)) ? 'recognized' : null;
-        if (fromKey) moveQueueItem(id, fromKey, 'done', { score: d.score });
+        const moved = fromKey ? moveQueueItem(id, fromKey, 'done', { score: d.score, comment: d.comment }) : gradingItem(id);
+        savePublishedFeedback(moved && moved.item ? moved.item : moved, withExpl ? state.gradingExplain[id] : []);
         DB.auditLog('发布成绩', d.name + ' 的成绩与批改反馈已发布', state.user && state.user.name);
         showToast('成绩已发布' + (withExpl ? '，学生版答案详解已下发' : '') + '，学生 App 已收到反馈', 'success');
         setTimeout(() => nav('#/grading'), 600);
       }
-    });
+      });
+    };
     $('#export-score').onclick = () => {
       const win = window.open('about:blank', '_blank', 'width=820,height=1000');
       if (!win) { showToast('浏览器拦截了新窗口，请允许弹窗后重试', 'error'); return; }
@@ -3797,36 +3969,41 @@
 
   /* ---------- 评分标准 ---------- */
   function renderRubric() {
-    const rows = [
-      ['选择题', '每题 3 分', '答案唯一，全对得分', 'OCR 比对 + 模型复核'],
-      ['填空题', '每题 4 分', '等价答案可得分；单位错误扣 1 分', '模型按知识点判定等价性'],
-      ['解答题', '每题 8 分', '过程分 5 分 + 结果分 3 分；关键步骤给分', '按评分要点逐项给分并说明错因'],
-      ['作文 / 主观题', '按篇给分', '内容 40% + 结构 30% + 语言 30%', '模型给出分项评分与提升建议']
+    const defaults = [
+      { type:'选择题', score:'每题 3 分', points:'答案唯一，全对得分', rule:'OCR 比对 + 模型复核' },
+      { type:'填空题', score:'每题 4 分', points:'等价答案可得分；单位错误扣 1 分', rule:'模型按知识点判定等价性' },
+      { type:'解答题', score:'每题 8 分', points:'过程分 5 分 + 结果分 3 分；关键步骤给分', rule:'按评分要点逐项给分并说明错因' },
+      { type:'作文 / 主观题', score:'按篇给分', points:'内容 40% + 结构 30% + 语言 30%', rule:'模型给出分项评分与提升建议' }
     ];
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('fh_rubric_v2') || 'null'); } catch (e) {}
+    const rows = defaults.map((row, i) => Object.assign({}, row, saved && saved.rows && saved.rows[i] ? saved.rows[i] : {}));
+    const switches = saved && Array.isArray(saved.switches) ? saved.switches : [true, true, false];
     const html =
       '<div class="page">' + crumb([{ label: '批改中心', route: '#/grading' }, { label: '评分标准' }]) +
       '<div class="page-head"><div><h1 class="page-title">评分标准</h1><p class="page-sub">按题型配置评分细则与 AI 批改规则，保存后对后续批改生效</p></div>' +
-      '<button class="btn btn-primary" id="save-rubric">' + icon('check', 15) + '保存标准</button></div>' +
+      '<div style="display:flex;gap:8px"><button class="btn btn-ghost" id="reset-rubric">恢复默认</button><button class="btn btn-primary" id="save-rubric">' + icon('check', 15) + '保存标准</button></div></div>' +
       '<div class="card" style="padding:0"><div class="table-wrap"><table class="tbl">' +
       '<thead><tr><th>题型</th><th>分值</th><th>评分要点</th><th>AI 批改规则</th></tr></thead><tbody>' +
-      rows.map(r => '<tr><td style="font-weight:600;color:var(--ink)">' + r[0] + '</td><td class="num">' + r[1] + '</td><td>' + r[2] + '</td><td>' + r[3] + '</td></tr>').join('') +
+      rows.map((r, i) => '<tr><td style="font-weight:600;color:var(--ink)">' + esc(r.type) + '</td><td><input class="input rubric-input" data-rubric-field="score" data-rubric-index="' + i + '" value="' + esc(r.score) + '"></td><td><textarea class="textarea rubric-input" data-rubric-field="points" data-rubric-index="' + i + '" rows="2">' + esc(r.points) + '</textarea></td><td><textarea class="textarea rubric-input" data-rubric-field="rule" data-rubric-index="' + i + '" rows="2">' + esc(r.rule) + '</textarea></td></tr>').join('') +
       '</tbody></table></div></div>' +
       '<div class="card" style="margin-top:16px"><h2 class="section-title" style="margin-bottom:10px">异常卷规则</h2>' +
       '<div style="display:flex;flex-direction:column;gap:10px">' +
-      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">识别置信度低于阈值自动标红</div><div class="qc-meta">识别置信度 &lt; 80% 的答卷进入「待复核」并优先展示</div></div><button class="switch on" data-rub-sw="1"></button></div>' +
-      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">低分答卷强制人工复核</div><div class="qc-meta">得分低于满分的 50% 时，不可直接发布</div></div><button class="switch on" data-rub-sw="2"></button></div>' +
-      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">批改修正率预警</div><div class="qc-meta">人工修正率高于 30% 时提示模型迭代</div></div><button class="switch" data-rub-sw="3"></button></div>' +
+      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">识别置信度低于阈值自动标红</div><div class="qc-meta">识别置信度 &lt; 80% 的答卷进入「待复核」并优先展示</div></div><button class="switch' + (switches[0] ? ' on' : '') + '" data-rub-sw="0" aria-label="切换识别置信度规则"></button></div>' +
+      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">低分答卷强制人工复核</div><div class="qc-meta">得分低于满分的 50% 时，不可直接发布</div></div><button class="switch' + (switches[1] ? ' on' : '') + '" data-rub-sw="1" aria-label="切换低分复核规则"></button></div>' +
+      '<div class="setting-row"><div><div style="font-size:13.5px;font-weight:600;color:var(--ink)">批改修正率预警</div><div class="qc-meta">人工修正率高于 30% 时提示模型迭代</div></div><button class="switch' + (switches[2] ? ' on' : '') + '" data-rub-sw="2" aria-label="切换修正率预警规则"></button></div>' +
       '</div></div></div>';
     renderPage(html);
     $$('.switch').forEach(s => s.onclick = () => s.classList.toggle('on'));
-    try {
-      const saved = JSON.parse(localStorage.getItem('fh_rubric') || 'null');
-      if (Array.isArray(saved)) {
-        $$('.switch').forEach((s, i) => s.classList.toggle('on', !!saved[i]));
-      }
-    } catch (e) {}
+    $('#reset-rubric').onclick = () => { try { localStorage.removeItem('fh_rubric_v2'); } catch (e) {} showToast('评分标准已恢复默认，请确认后保存', 'info'); renderRubric(); };
     $('#save-rubric').onclick = () => {
-      localStorage.setItem('fh_rubric', JSON.stringify($$('.switch').map(s => s.classList.contains('on'))));
+      const nextRows = defaults.map((row, i) => {
+        const get = field => $('[data-rubric-field="' + field + '"][data-rubric-index="' + i + '"]');
+        return { type: row.type, score: get('score').value.trim(), points: get('points').value.trim(), rule: get('rule').value.trim() };
+      });
+      const next = { rows: nextRows, switches: $$('[data-rub-sw]').map(s => s.classList.contains('on')), savedAt: DB.now() };
+      localStorage.setItem('fh_rubric_v2', JSON.stringify(next));
+      DB.auditLog('更新评分标准', '已保存 ' + nextRows.length + ' 类题型及异常卷规则', state.user && state.user.name);
       showToast('评分标准已保存，AI 批改规则已更新，操作已记录', 'success');
     };
   }
