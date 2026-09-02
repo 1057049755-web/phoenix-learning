@@ -1109,7 +1109,12 @@
     injectModuleToolkit(main);
   }
 
-  window.__app = { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$, DB };
+  window.__app = {
+    state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput,
+    noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile,
+    personalizationService, mountPersonalizationBlock, mountPlanExecution, openPersonalProfileEditor,
+    $, $$, DB
+  };
 
   /* 原生保存桥：Android WebView 内把文本文件交给系统「下载」目录；浏览器环境返回 false 走原逻辑 */
   window.fhNativeSave = function (name, content) {
@@ -1453,7 +1458,7 @@
   'use strict';
   const M = window.MOCK;
   const DB = window.FH_DB;
-  const { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$ } = window.__app;
+  const { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, personalizationService, mountPersonalizationBlock, mountPlanExecution, openPersonalProfileEditor, $, $$ } = window.__app;
   const P = window.__pages;
 
   /* ---------- 通用小组件 ---------- */
@@ -4063,7 +4068,7 @@
     practice = sessionCache[practiceKey] || null;
     const practicePrompt = k.variation || '请用自己的话说明这个知识点，并举一个例子。';
     const practiceBlock = '<div class="card kd-practice" style="margin:14px 0"><h3>先答再看：变式练习</h3><p class="form-hint">请先独立写下思路，再查看参考反馈。答案不会直接显示在题目前。</p><div class="kd-example">' + esc(practicePrompt) + '</div>' +
-      '<textarea class="input" id="kd-answer" rows="3" placeholder="写下你的答案或解题步骤…">' + esc(practice && practice.answer || '') + '</textarea>' +
+      '<textarea class="textarea" id="kd-answer" rows="3" placeholder="写下你的答案或解题步骤…">' + esc(practice && practice.answer || '') + '</textarea>' +
       '<button class="btn btn-primary" id="kd-submit-practice" style="margin-top:8px">提交并查看反馈</button>' +
       (practice ? '<div class="kd-why" style="margin-top:10px;border-left-color:var(--primary)"><b>' + (practice.ok ? '做得不错：' : '再想一步：') + '</b>' + esc(practice.feedback) + '<br><b>参考检查：</b>' + esc(k.tip || k.pitfall) + '</div>' : '') + '</div>';
     const html =
@@ -4153,7 +4158,8 @@
       const id = b.dataset.wrong;
       state.wrongDone = state.wrongDone || {};
       state.wrongDone[id] = !state.wrongDone[id];
-      if (personalizationService()) personalizationService().scheduleReview(state.user, w, state.wrongDone[id]);
+      const item = wrongs.find(w => String(w.id) === String(id));
+      if (personalizationService() && item) personalizationService().scheduleReview(state.user, item, state.wrongDone[id]);
       renderWrongBook();
     });
   }

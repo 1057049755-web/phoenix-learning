@@ -417,3 +417,83 @@ pre {
     scroll-behavior: auto !important;
   }
 }
+
+/* 最终适配收口：长文字可读，表单不挤出容器，弹窗只在内容区滚动。 */
+html,
+body,
+.app-shell,
+.body-wrap,
+.main,
+.page,
+.page > *,
+.card,
+.dialog,
+.dialog-body {
+  min-width: 0;
+}
+
+input,
+select,
+textarea,
+.input,
+.select,
+.textarea,
+.btn {
+  min-width: 0;
+  max-width: 100%;
+}
+
+input,
+select {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+textarea,
+.textarea {
+  height: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.65;
+}
+
+.dialog-mask {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dialog,
+.dialog-body,
+.page-sub,
+.form-hint,
+.field-error,
+.capability-card p,
+.research-item small,
+.notice-preview small {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.workspace-hero:after {
+  inset: 0;
+}
+
+.capability-card:before {
+  right: 0;
+  top: 0;
+}
+
+@media (max-width: 760px) {
+  .workspace-orbit {
+    right: 16px;
+  }
+
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  .dialog-actions .btn {
+    min-width: 0;
+  }
+}
