@@ -81,6 +81,57 @@
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function roleLabel(role) { return (M.roles[role] && M.roles[role].label) || (role === 'academic' ? '教务处' : role === 'admin' ? '管理端' : role === 'student' ? '学生' : '老师'); }
+  function maskPhone(phone) {
+    const value = String(phone || '');
+    return /^1\d{10}$/.test(value) ? value.slice(0, 3) + '****' + value.slice(-4) : '已保护';
+  }
+  function currentSchoolId() { return String((state.user && state.user.schoolId) || 'school_default'); }
+  function classMatches(a, b) {
+    if (!a || !b) return false;
+    if (a.classId && b.classId && String(a.classId) === String(b.classId)) return true;
+    if (a.cls && b.cls && String(a.cls) === String(b.cls)) return true;
+    const ids = Array.isArray(a.classIds) ? a.classIds : [];
+    return !!b.classId && ids.some(id => String(id) === String(b.classId));
+  }
+  function scopedUsers() {
+    const all = DB.users();
+    const me = state.user || {};
+    if (state.role === 'admin') return all;
+    if (state.role === 'academic') return all.filter(u => String(u.schoolId || 'school_default') === currentSchoolId() && u.role !== 'admin');
+    if (state.role === 'teacher') return all.filter(u => u.id === me.id || (u.role === 'student' && String(u.schoolId || 'school_default') === currentSchoolId() && classMatches(me, u)));
+    return me.id ? all.filter(u => u.id === me.id) : [];
+  }
+  function scopedClasses() {
+    const all = DB.classes ? DB.classes() : [];
+    const me = state.user || {};
+    if (state.role === 'admin') return all;
+    if (state.role === 'academic') return all.filter(c => String(c.schoolId || 'school_default') === currentSchoolId());
+    if (state.role === 'teacher') return all.filter(c => (me.classIds || []).some(id => String(id) === String(c.id)) || String(c.name || '') === String(me.cls || ''));
+    return all.filter(c => (me.classIds || []).some(id => String(id) === String(c.id)) || String(c.name || '') === String(me.cls || ''));
+  }
+  function canManageRosterRole(role) {
+    if (!state.user) return false;
+    return !!(DB.canManageRole && DB.canManageRole(state.user, role));
+  }
+  function classSummaryForStudent(student) {
+    const teachers = DB.users().filter(u => u.role === 'teacher' && String(u.schoolId || 'school_default') === String(student.schoolId || 'school_default') && classMatches(u, student));
+    const cls = (DB.classes ? DB.classes() : []).find(c => String(c.id) === String(student.classId)) || { name: student.cls || '未分班', grade: student.grade || '—' };
+    return { cls: cls.name || student.cls || '未分班', grade: cls.grade || student.grade || '—', school: student.schoolName || '本校', teachers: teachers };
+  }
+  function recordInScope(record) {
+    const me = state.user || {};
+    if (!record) return false;
+    if (state.role === 'admin') return true;
+    if (state.role === 'academic') return String(record.schoolId || 'school_default') === currentSchoolId();
+    if (state.role === 'student') return String(record.studentId || '') === String(me.id || '') || String(record.studentPhone || '') === String(me.phone || '');
+    if (state.role === 'teacher') {
+      if (String(record.ownerId || '') === String(me.id || '')) return true;
+      if (record.studentId) return scopedUsers().some(u => String(u.id) === String(record.studentId));
+      return classMatches(me, { cls: record.cls, classId: record.classId });
+    }
+    return false;
+  }
 
   function showToast(msg, type) {
     const wrap = $('#toast-wrap');
@@ -295,7 +346,9 @@
       ? ['home', 'knowledge', 'wrongbook', 'plan', 'resources']
       : state.role === 'admin'
         ? ['home', 'admin', 'resources']
-        : ['home', 'paper', 'grading', 'resources', 'analytics'];
+        : state.role === 'academic'
+          ? ['home', 'admin', 'grading', 'analytics', 'resources']
+        : ['home', 'paper', 'grading', 'resources', 'analytics', 'admin'];
     return wanted.map(key => mods.find(m => m.key === key)).filter(Boolean);
   }
 
@@ -325,7 +378,9 @@
 
   function renderSidebar() {
     const mod = activeModule();
-    const items = M.sidebar[mod] || [];
+    const items = mod === 'admin' && state.role === 'teacher'
+      ? (M.sidebar.admin || []).filter(it => ['成员管理', '班级管理'].includes(it.label))
+      : M.sidebar[mod] || [];
     $('#sidebar').innerHTML =
       '<div class="sidebar-section"><div class="sidebar-label">' + esc(moduleLabel(mod)) + '</div>' +
       items.map(it => {
@@ -357,7 +412,7 @@
     renderMobileNav();
     const an = $('#account-name');
     const u = state.user || {};
-    const uname = u.name || (u.role === 'student' ? '学生账号' : u.role === 'admin' ? '管理员' : '教师账号');
+    const uname = u.name || (u.role === 'student' ? '学生账号' : u.role === 'admin' ? '平台管理员' : u.role === 'academic' ? '教务处账号' : '教师账号');
     an.textContent = uname.length > 6 ? uname.slice(0, 6) + '…' : uname;
     $('#menu-role').textContent = M.roles[state.role] ? M.roles[state.role].label : (u.role === 'student' ? '学生' : '');
     const avatars = $$('.account-menu-wrap .avatar');
@@ -365,9 +420,9 @@
     const mName = $('.account-menu-name');
     if (mName) mName.textContent = uname;
     const mPhone = $('.account-menu-phone');
-    if (mPhone) mPhone.textContent = u.phone || '';
+    if (mPhone) mPhone.textContent = u.phone ? maskPhone(u.phone) : '账号信息已保护';
     const brandTag = $('.brand-tag');
-    if (brandTag) brandTag.textContent = state.role === 'admin' ? '管理端' : state.role === 'student' ? '学生端' : '教师端';
+    if (brandTag) brandTag.textContent = state.role === 'admin' ? '管理端' : state.role === 'student' ? '学生端' : state.role === 'academic' ? '教师端 · 教务处' : '教师端';
     $('#offline-text').textContent = state.offline ? '弱网' : '在线';
     $('#offline-toggle').classList.toggle('online-off', state.offline);
     $('#offline-banner').classList.toggle('hidden', !state.offline);
@@ -403,7 +458,7 @@
       '<div class="form-hint">初始密码为手机号后 6 位；首次登录后设置新密码，即视为正式激活。</div></div>' +
       '<button type="submit" class="btn btn-primary btn-lg" style="width:100%">登录</button>' +
       '</form>' +
-      '<div class="login-role-picker" aria-label="登录角色"><span>登录身份</span><button type="button" data-login-role="admin">管理员</button><button type="button" data-login-role="teacher">老师</button><button type="button" data-login-role="student">学生</button></div>' +
+      '<div class="login-role-picker" aria-label="登录角色"><span>登录身份</span><button type="button" data-login-role="admin">管理端</button><button type="button" data-login-role="academic">教务处</button><button type="button" data-login-role="teacher">老师</button><button type="button" data-login-role="student">学生</button></div>' +
       '<div class="third-party-login"><div class="third-party-title">其他登录方式 <small>均需管理员配置</small></div><div class="third-party-grid">' + ['QQ','微信','GitHub','Google','Apple'].map(x => '<button type="button" class="third-party-btn" data-oauth="' + x + '">' + x + '<small>尚未配置</small></button>').join('') + '</div></div>' +
       '<div class="login-foot">' + (cloudInfo.cloud ? (cloudInfo.cloudErr || '本机服务已连接：数据写入本机配置文件夹') : '浏览器本地模式：数据暂存当前设备') + '</div>' +
       '<div class="login-note"><span>教育 App 备案号</span><span>深度合成标识</span></div>' +
@@ -411,7 +466,7 @@
 
     const panel = $('#login-panel');
     const hintedRole = parseHash().query.role;
-    state.loginRole = ['admin', 'teacher', 'student'].includes(hintedRole) ? hintedRole : 'teacher';
+    state.loginRole = ['admin', 'academic', 'teacher', 'student'].includes(hintedRole) ? hintedRole : 'teacher';
     const defaultRole = $('[data-login-role="' + state.loginRole + '"]');
     if (defaultRole) defaultRole.classList.add('active');
     const card = document.querySelector('.login-card-modern');
@@ -564,14 +619,14 @@
   }
 
   function currentNotices() {
-    const roleScope = state.role === 'student' ? '学生' : state.role === 'teacher' ? '教师' : '管理员';
+    const roleScope = state.role === 'student' ? '学生' : state.role === 'teacher' ? '教师' : state.role === 'academic' ? '教师' : '管理员';
     const todayKey = new Date().toISOString().slice(0, 10);
     return DB.notices().filter(n => {
       const status = n.status || '已发布';
       const scope = ['全校', '教师', '学生', '管理员'].includes(n.scope) ? n.scope : '全校';
       if (status !== '已发布') return false;
       if (n.expiresAt && n.expiresAt < todayKey) return false;
-      return state.role === 'admin' || scope === '全校' || scope === roleScope;
+      return state.role === 'admin' || state.role === 'academic' || scope === '全校' || scope === roleScope;
     });
   }
 
@@ -587,7 +642,7 @@
     const root = $('#dialog-root');
     const list = currentNotices();
     if (focusId) DB.markNoticeRead(focusId, state.user && state.user.id);
-    root.innerHTML = '<div class="dialog-mask"><div class="dialog announcement-center" role="dialog" aria-modal="true" aria-label="通知与公告"><div class="dialog-title">通知与公告</div><p class="dialog-body">这里展示当前账号可见的正式公告。阅读状态按账号分别记录。</p><div class="announcement-center-list">' + (list.length ? list.map(n => '<article class="announcement-reader' + noticePriorityClass(n) + (n.id === focusId ? ' focused' : '') + '"><div class="announcement-reader-head"><div><span>' + esc(n.priority || '普通') + '</span><b>' + esc(noticeTitle(n)) + '</b></div><small>' + esc(n.scope || '全校') + ' · ' + esc((n.publishedAt || n.createdAt || '').slice(0, 10)) + '</small></div><p>' + esc(n.text) + '</p><div class="announcement-reader-foot"><span>发布：' + esc(n.publisher || '系统') + (n.expiresAt ? ' · 有效至 ' + esc(n.expiresAt) : '') + '</span>' + (noticeIsRead(n) || n.id === focusId ? '<em>已读</em>' : '<button type="button" data-notice-read="' + esc(n.id) + '">标为已读</button>') + '</div></article>').join('') : '<div class="plan-empty">当前没有可查看的公告。</div>') + '</div><div class="dialog-actions">' + (state.role === 'admin' ? '<button class="btn btn-outline" data-notice-manage>管理公告</button>' : '') + '<button class="btn btn-primary" data-notice-center-close>关闭</button></div></div></div>';
+    root.innerHTML = '<div class="dialog-mask"><div class="dialog announcement-center" role="dialog" aria-modal="true" aria-label="通知与公告"><div class="dialog-title">通知与公告</div><p class="dialog-body">这里展示当前账号可见的正式公告。阅读状态按账号分别记录。</p><div class="announcement-center-list">' + (list.length ? list.map(n => '<article class="announcement-reader' + noticePriorityClass(n) + (n.id === focusId ? ' focused' : '') + '"><div class="announcement-reader-head"><div><span>' + esc(n.priority || '普通') + '</span><b>' + esc(noticeTitle(n)) + '</b></div><small>' + esc(n.scope || '全校') + ' · ' + esc((n.publishedAt || n.createdAt || '').slice(0, 10)) + '</small></div><p>' + esc(n.text) + '</p><div class="announcement-reader-foot"><span>发布：' + esc(n.publisher || '系统') + (n.expiresAt ? ' · 有效至 ' + esc(n.expiresAt) : '') + '</span>' + (noticeIsRead(n) || n.id === focusId ? '<em>已读</em>' : '<button type="button" data-notice-read="' + esc(n.id) + '">标为已读</button>') + '</div></article>').join('') : '<div class="plan-empty">当前没有可查看的公告。</div>') + '</div><div class="dialog-actions">' + (state.role === 'admin' || state.role === 'academic' ? '<button class="btn btn-outline" data-notice-manage>管理公告</button>' : '') + '<button class="btn btn-primary" data-notice-center-close>关闭</button></div></div></div>';
     $$('[data-notice-read]', root).forEach(button => button.onclick = () => { DB.markNoticeRead(button.dataset.noticeRead, state.user && state.user.id); openNoticeCenter(); updateNoticeBadge(); });
     const manage = $('[data-notice-manage]', root);
     if (manage) manage.onclick = () => { root.innerHTML = ''; nav('#/admin?tab=notices'); };
@@ -598,11 +653,12 @@
   function renderHome() {
     const isStudent = state.role === 'student';
     const isAdmin = state.role === 'admin';
-    const isTeacher = !isStudent && !isAdmin;
+    const isAcademic = state.role === 'academic';
+    const isTeacher = state.role === 'teacher';
     const grading = DB.grading();
-    const reviewN = (grading.review || []).length;
-    const doneN = (grading.done || []).length;
-    const users = DB.users();
+    const reviewN = (grading.review || []).filter(recordInScope).length;
+    const doneN = (grading.done || []).filter(recordInScope).length;
+    const users = state.role === 'admin' ? DB.users() : scopedUsers();
     const studentN = users.filter(u => u.role === 'student').length;
     const teacherN = users.filter(u => u.role === 'teacher').length;
     const classN = new Set(users.map(u => u.cls).filter(Boolean)).size;
@@ -614,12 +670,12 @@
     const planDone = planItems.filter(x => x.done).length;
     const planRate = planItems.length ? Math.round(planDone / planItems.length * 100) : 0;
     const user = state.user || {};
-    const greeting = isStudent ? '把今天学明白，也把成长留下来' : isAdmin ? '让学校运行更清楚，让教学支持更及时' : '从备课到研究，把每一次教学变成证据';
-    const roleCycle = isStudent ? '学 · 练 · 诊 · 复' : isAdmin ? '人 · 班 · 资源 · 服务' : '备 · 教 · 评 · 研';
-    const heroPrimary = isStudent ? '#/knowledge' : isAdmin ? '#/admin' : '#/paper';
-    const heroSecondary = isStudent ? '#/analytics/students/plan' : isAdmin ? '#/resources' : '#/analytics';
-    const heroPrimaryText = isStudent ? '开始学习' : isAdmin ? '进入学校管理' : '开始备课组卷';
-    const heroSecondaryText = isStudent ? '查看学习计划' : isAdmin ? '查看资源审核' : '进入学情研究';
+    const greeting = isStudent ? '把今天学明白，也把成长留下来' : isAdmin ? '让学校运行更清楚，让教学支持更及时' : isAcademic ? '让校级教务真正抵达每个班级' : '从备课到研究，把每一次教学变成证据';
+    const roleCycle = isStudent ? '学 · 练 · 诊 · 复' : isAdmin ? '人 · 校 · 班 · 服务' : isAcademic ? '校 · 师 · 生 · 证据' : '班 · 教 · 评 · 研';
+    const heroPrimary = isStudent ? '#/knowledge' : isAdmin || isAcademic ? '#/admin' : '#/paper';
+    const heroSecondary = isStudent ? '#/analytics/students/plan' : isAdmin ? '#/resources' : isAcademic ? '#/analytics' : '#/grading';
+    const heroPrimaryText = isStudent ? '开始学习' : isAdmin ? '进入管理中枢' : isAcademic ? '进入校级管理' : '开始备课组卷';
+    const heroSecondaryText = isStudent ? '查看学习计划' : isAdmin ? '查看资源审核' : isAcademic ? '查看校级学情' : '进入批改中心';
     const capabilityCards = isStudent ? [
       ['knowledge','理解知识点','概念、例题与追问连成一条学习路径','#/knowledge','cyan','先理解'],
       ['wrong','错题诊断','从错误原因出发，安排变式与复习节奏','#/wrongbook','rose','再诊断'],
@@ -630,6 +686,11 @@
       ['class','班级运行','查看班级结构与教学组织基础信息','#/admin?tab=classes','violet','班级'],
       ['notice','公告发布','面向全校或指定角色发布、撤回与管理公告','#/admin?tab=notices','amber','协同'],
       ['book','资源审核','沉淀可复用、可追溯的校本教学资源','#/resources','emerald','资源']
+    ] : isAcademic ? [
+      ['members','师生导入','批量导入教师与学生，自动落入本校组织树','#/admin','cyan','组织'],
+      ['class','班级运行','维护年级、班级、任课教师与学生归属','#/admin?tab=classes','violet','班级'],
+      ['chart','校级学情','查看本校班级进度与学生反馈趋势','#/analytics','emerald','数据'],
+      ['book','教务资源','沉淀、复用本校教学资源与语料','#/resources','amber','资源']
     ] : [
       ['paper','智能备课组卷','从教材章节和知识图谱快速组织教学任务','#/paper','cyan','备课'],
       ['grading','批改与反馈','AI 预批改、教师复核，形成可信反馈闭环','#/grading','emerald','评价'],
@@ -640,6 +701,8 @@
       [planRate + '%','今日计划完成'],[(user.wrongs || []).length,'个人错题'],[(user.submissions || []).length,'学习反馈'],[resourcesN,'可用学习资源']
     ] : isAdmin ? [
       [studentN,'学生账号'],[teacherN,'教师账号'],[classN,'班级与部门'],[unreadN,'未读动态']
+    ] : isAcademic ? [
+      [studentN,'本校学生'],[teacherN,'本校教师'],[classN,'本校班级'],[unreadN,'未读动态']
     ] : [
       [reviewN,'待复核答卷'],[doneN,'已完成批改'],[studentN,'覆盖学生'],[resourcesN,'共建资源']
     ];
@@ -651,16 +714,23 @@
       ['教学支持画像','从成员、班级和资源三个维度了解学校支持需求。','#/admin'],
       ['资源质量治理','让校本资源有来源、有审核、有版本、有复用。','#/resources'],
       ['服务运行检查','统一查看 AI 服务、权限边界和本地运行状态。','#/admin?tab=permissions']
+    ] : isAcademic ? [
+      ['组织关系维护','从学校、教务处到班级，保持师生归属清楚可追溯。','#/admin?tab=classes'],
+      ['校级数据支持','把班级批改、计划与资源汇总成教务可读的证据。','#/analytics'],
+      ['教师协作服务','为老师提供名单、资源、公告与批改支持。','#/admin']
     ] : [
       ['班级问题发现','从学情报告定位共性薄弱点，形成下一轮教学问题。','#/analytics'],
       ['教学证据沉淀','把组卷、批改、反馈和资源转化为可复盘的教学证据。','#/grading'],
       ['校本研究共创','将优秀讲义、案例和课堂语料沉淀到资源库。','#/resources']
     ];
     const capabilityHtml = capabilityCards.map(c => '<article class="capability-card tone-' + c[4] + '" data-nav="' + c[3] + '"><div class="capability-top"><span class="capability-icon tone-' + c[4] + '">' + icon(c[0], 22) + '</span><span class="capability-stage">' + c[5] + '</span></div><h3>' + c[1] + '</h3><p>' + c[2] + '</p><span class="capability-link">进入功能 ' + icon('arrow', 16) + '</span></article>').join('');
+    const classSummary = isStudent ? classSummaryForStudent(user) : null;
+    const classInfoHtml = isStudent ? '<section class="student-class-card"><div class="student-class-card__head"><div><span>我的班级</span><h2>' + esc(classSummary.cls) + '</h2></div><span class="tag tag-blue">' + esc(classSummary.school) + '</span></div><div class="student-class-card__meta"><span>' + esc(classSummary.grade) + '</span><span>班级信息已按权限展示</span><span>个人手机号：' + maskPhone(user.phone) + '</span></div><div class="student-class-card__teachers"><b>任课老师</b>' + (classSummary.teachers.length ? classSummary.teachers.map(t => '<span>' + esc(t.name) + ' · ' + maskPhone(t.phone) + '</span>').join('') : '<span>老师信息待教务处完善</span>') + '</div></section>' : '';
     const html =
       '<div class="page">' +
       '<section class="workspace-hero role-' + state.role + '"><div class="workspace-hero-copy"><span class="workspace-eyebrow">' + roleCycle + ' · 全端工作台</span><h1>' + greeting + '</h1><p>' + today() + ' · ' + esc(M.roles[state.role].label) + '视角。网页、手机与安装端使用同一套学习和教学流程。</p><div class="workspace-actions"><button class="btn workspace-primary" data-nav="' + heroPrimary + '">' + heroPrimaryText + '</button><button class="btn workspace-secondary" data-nav="' + heroSecondary + '">' + heroSecondaryText + '</button></div></div><div class="workspace-orbit" aria-hidden="true"><span></span><span></span><span></span><b>AI</b></div></section>' +
       '<div class="workspace-status"><span><i class="status-dot ' + (state.offline ? 'gold' : 'green') + '"></i>' + (state.offline ? '弱网模式' : '当前在线') + '</span><span>' + (cloudInfo.cloud ? (cloudInfo.cloudErr ? '服务已连接 · 待补传' : '本机服务已同步') : '浏览器本地存储') + '</span><span>桌面 · 手机 · Android · iOS/PWA</span></div>' +
+      classInfoHtml +
       '<section class="workspace-metrics">' + metrics.map(m => '<div class="metric-card"><strong>' + m[0] + '</strong><span>' + m[1] + '</span></div>').join('') + '</section>' +
       '<div class="workspace-section-head"><div><span>核心工作流</span><h2>' + (isStudent ? '让学习过程完整发生' : isAdmin ? '让学校支持真正抵达教学现场' : '让教学工作形成可研究的闭环') + '</h2></div><p>所有卡片均连接到现有真实功能。</p></div>' +
       '<section class="capability-grid">' + capabilityHtml + '</section>' +
@@ -678,7 +748,7 @@
         '<button class="btn btn-outline btn-sm" data-nav="#/grading?tab=done">查看</button></div>' : '') +
       (!reviewN && !doneN ? '<div class="empty-state" style="padding:18px 0 4px">' + icon('check', 26) + '<div>暂无待办，上传答卷或组卷后这里会自动出现任务</div></div>' : '') +
       (state.offline ? '<div class="empty-state" style="padding:18px 0 4px">' + icon('clock', 26) + '<div>离线模式：批改与发布任务已进入队列</div></div>' : '') +
-      '</div></main><aside><div class="card research-card"><div class="card-heading"><div><span>成长与研究</span><h2>' + (isStudent ? '学习能力培养' : isAdmin ? '学校改进视角' : '教学研究工作台') + '</h2></div></div>' + researchCards.map((r, i) => '<button class="research-item" data-nav="' + r[2] + '"><span>0' + (i + 1) + '</span><div><b>' + r[0] + '</b><small>' + r[1] + '</small></div>' + icon('arrow', 16) + '</button>').join('') + '</div><div class="card notice-card"><div class="card-heading"><div><span>协同动态</span><h2>通知与公告</h2></div><button class="notice-view-all" type="button" data-notice-center>' + unreadN + ' 条未读</button></div>' + (notices.length ? notices.slice(0, 5).map(n => '<button type="button" class="notice-preview' + noticePriorityClass(n) + (noticeIsRead(n) ? '' : ' unread') + '" data-notice-view="' + esc(n.id) + '"><span class="notice-date">' + esc((n.publishedAt || n.createdAt || '').slice(5, 10)) + '</span><span><b>' + esc(noticeTitle(n)) + '</b><small>' + esc(n.text) + '</small></span></button>').join('') : '<div class="empty-state" style="padding:18px 0 4px">' + icon('notice', 26) + '<div>暂无公告</div></div>') + (isAdmin ? '<button class="notice-admin-entry" type="button" data-nav="#/admin?tab=notices">' + icon('plus', 14) + ' 发布或管理公告</button>' : '') + '</div></aside></div>' +
+      '</div></main><aside><div class="card research-card"><div class="card-heading"><div><span>成长与研究</span><h2>' + (isStudent ? '学习能力培养' : isAdmin ? '学校改进视角' : isAcademic ? '校级教务支持' : '教学研究工作台') + '</h2></div></div>' + researchCards.map((r, i) => '<button class="research-item" data-nav="' + r[2] + '"><span>0' + (i + 1) + '</span><div><b>' + r[0] + '</b><small>' + r[1] + '</small></div>' + icon('arrow', 16) + '</button>').join('') + '</div><div class="card notice-card"><div class="card-heading"><div><span>协同动态</span><h2>通知与公告</h2></div><button class="notice-view-all" type="button" data-notice-center>' + unreadN + ' 条未读</button></div>' + (notices.length ? notices.slice(0, 5).map(n => '<button type="button" class="notice-preview' + noticePriorityClass(n) + (noticeIsRead(n) ? '' : ' unread') + '" data-notice-view="' + esc(n.id) + '"><span class="notice-date">' + esc((n.publishedAt || n.createdAt || '').slice(5, 10)) + '</span><span><b>' + esc(noticeTitle(n)) + '</b><small>' + esc(n.text) + '</small></span></button>').join('') : '<div class="empty-state" style="padding:18px 0 4px">' + icon('notice', 26) + '<div>暂无公告</div></div>') + (isAdmin || isAcademic ? '<button class="notice-admin-entry" type="button" data-nav="#/admin?tab=notices">' + icon('plus', 14) + ' 发布或管理公告</button>' : '') + '</div></aside></div>' +
       '</div>';
     renderPage(html);
     bindTodayPlan();
@@ -1214,7 +1284,7 @@
     injectModuleToolkit(main);
   }
 
-  window.__app = { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$, DB };
+  window.__app = { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$, DB, roleLabel, maskPhone, currentSchoolId, classMatches, scopedUsers, scopedClasses, canManageRosterRole, classSummaryForStudent, recordInScope };
 
   /* 原生保存桥：Android WebView 内把文本文件交给系统「下载」目录；浏览器环境返回 false 走原逻辑 */
   window.fhNativeSave = function (name, content) {
@@ -1237,7 +1307,7 @@
       nav('#/home');
       return;
     }
-    if (state.role === 'teacher' && ['/admin', '/help'].some(p => path.startsWith(p))) {
+    if (state.role === 'teacher' && ['/help'].some(p => path.startsWith(p))) {
       showToast('教师账号仅开放教学、班级、布置批改与审核功能', 'error');
       nav('#/home');
       return;
@@ -1285,7 +1355,9 @@
     const allowedKeys = state.role === 'student'
       ? ['home', 'knowledge', 'wrongbook', 'grading', 'resources', 'plan', 'help']
       : state.role === 'teacher'
-        ? ['home', 'paper', 'grading', 'resources', 'analytics', 'help']
+        ? ['home', 'paper', 'grading', 'resources', 'analytics', 'admin', 'help']
+        : state.role === 'academic'
+          ? ['home', 'paper', 'grading', 'resources', 'analytics', 'admin', 'help']
         : ['home', 'admin', 'resources'];
     const entries = [];
     modules.filter(m => allowedKeys.includes(m.key)).forEach(m => {
@@ -1556,7 +1628,7 @@
   'use strict';
   const M = window.MOCK;
   const DB = window.FH_DB;
-  const { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$ } = window.__app;
+  const { state, showToast, confirmDialog, nav, icon, esc, renderHome, renderPage, attachVoiceInput, noticeTitle, noticePriorityClass, updateNoticeBadge, runEducationAI, parseAIJson, aiRoleProfile, $, $$, roleLabel, maskPhone, currentSchoolId, classMatches, scopedUsers, scopedClasses, canManageRosterRole, classSummaryForStudent, recordInScope } = window.__app;
   const P = window.__pages;
 
   /* ---------- 通用小组件 ---------- */
@@ -2691,16 +2763,16 @@
     const isStudent = state.role === 'student';
     const G = DB.grading();
     const rawGroups = [
-      { key: 'recognized', label: '已识别', dot: 'blue', icon: 'upload', items: G.recognized || [] },
-      { key: 'grading', label: '批改中', dot: 'blue', icon: 'clock', items: G.grading || [] },
-      { key: 'review', label: '待复核', dot: 'gold', icon: 'review', items: G.review || [] },
-      { key: 'done', label: '已完成', dot: 'green', icon: 'done', items: G.done || [] }
+      { key: 'recognized', label: '已识别', dot: 'blue', icon: 'upload', items: (G.recognized || []).filter(recordInScope) },
+      { key: 'grading', label: '批改中', dot: 'blue', icon: 'clock', items: (G.grading || []).filter(recordInScope) },
+      { key: 'review', label: '待复核', dot: 'gold', icon: 'review', items: (G.review || []).filter(recordInScope) },
+      { key: 'done', label: '已完成', dot: 'green', icon: 'done', items: (G.done || []).filter(recordInScope) }
     ];
     const groups = isStudent ? [Object.assign({}, rawGroups[3], { items: rawGroups[3].items.filter(item => item.published || item.feedback) })] : rawGroups;
     const tabs = [{ key: 'all', label: '全部' }].concat(groups.map(g => ({ key: g.key, label: g.label })));
     const total = groups.reduce((s, g) => s + g.items.length, 0);
-    const reviewN = (G.review || []).length;
-    const doneN = (G.done || []).length;
+    const reviewN = rawGroups.find(g => g.key === 'review').items.length;
+    const doneN = rawGroups.find(g => g.key === 'done').items.length;
     const route = (tab, nextKeyword, nextSort) => {
       const params = [];
       if (tab && tab !== 'all') params.push('tab=' + encodeURIComponent(tab));
@@ -2759,7 +2831,7 @@
             clearInterval(t);
             list.forEach(file => {
               const name = (file.name || '新上传答卷').replace(/\.[^.]+$/, '');
-              DB.addGradingItem({ name: name, fileName: file.name || '', fileSize: file.size || 0, cls: '未分班', task: '新上传答卷', time: '刚刚', createdAt: DB.now(), status: 'recognized', note: '已识别，等待教师核对后开始批改', progress: 0, total: 100, answers: [{ no: 1, title: '待核对题目', text: '已上传文件，识别文本待教师核对。' }] });
+              DB.addGradingItem({ name: name, fileName: file.name || '', fileSize: file.size || 0, cls: state.user && state.user.cls || '未分班', classId: state.user && state.user.classId || '', schoolId: currentSchoolId(), ownerId: state.user && state.user.id || '', task: '新上传答卷', time: '刚刚', createdAt: DB.now(), status: 'recognized', note: '已识别，等待教师核对后开始批改', progress: 0, total: 100, answers: [{ no: 1, title: '待核对题目', text: '已上传文件，识别文本待教师核对。' }] });
             });
             DB.auditLog('上传答卷', '上传 ' + count + ' 份答卷进入识别队列', state.user && state.user.name);
             showToast('已识别 ' + count + ' 份答卷，进入批改队列', 'success');
@@ -3307,8 +3379,8 @@
   /* ---------- 学情报告 ---------- */
   function renderAnalytics() {
     const G = DB.grading();
-    const done = G.done || [];
-    const students = DB.users().filter(u => u.role === 'student');
+    const done = (G.done || []).filter(recordInScope);
+    const students = scopedUsers().filter(u => u.role === 'student');
     const avg = done.length ? Math.round(done.reduce((s, x) => s + (x.score || 0), 0) / done.length) : 0;
     const pass = done.length ? done.filter(x => (x.score || 0) >= (x.total || 100) * 0.6).length : 0;
     const html =
@@ -3360,7 +3432,7 @@
   /* ---------- 学生明细 ---------- */
   function renderStudentDetail() {
     const sid = state.query.id || '';
-    const students = DB.users().filter(u => u.role === 'student');
+    const students = scopedUsers().filter(u => u.role === 'student');
     if (!sid) {
       const html =
         '<div class="page">' + crumb([{ label: '学情报告', route: '#/analytics' }, { label: '学生明细' }]) +
@@ -3381,7 +3453,7 @@
       $$('[data-stu]').forEach(b => b.onclick = () => nav('#/analytics/students?id=' + encodeURIComponent(b.dataset.stu)));
       return;
     }
-    const S = DB.users().find(u => u.id === sid) || students[0];
+    const S = students.find(u => u.id === sid) || students[0];
     if (!S) { renderPage(placeholder('学生不存在', '返回学生列表重新选择')); return; }
     const wrongs = S.wrongs || [];
     const exercises = S.exercises || [];
@@ -3436,9 +3508,9 @@
     const sid = state.query.id || '';
     let S = null;
     if (state.role === 'student') S = state.user;
-    else S = DB.users().find(u => u.id === sid) || null;
+    else S = scopedUsers().find(u => u.id === sid) || null;
     if (!S) {
-      const students = DB.users().filter(u => u.role === 'student');
+      const students = scopedUsers().filter(u => u.role === 'student');
       const html =
         '<div class="page">' + crumb([{ label: '学情报告', route: '#/analytics' }, { label: '学习计划书' }]) +
         '<div class="page-head"><div><h1 class="page-title">学习计划书</h1><p class="page-sub">选择一名学生，为其生成计划、配套习题与每日投入安排</p></div></div>' +
@@ -3592,7 +3664,7 @@
   }
 
   function openNoticeEditor(existing) {
-    if (state.role !== 'admin') { showToast('只有管理员可以发布公告', 'error'); return; }
+    if (!['admin', 'academic'].includes(state.role)) { showToast('只有管理端或教务处可以发布公告', 'error'); return; }
     const root = $('#dialog-root');
     const item = existing || {};
     const status = item.status || '草稿';
@@ -3650,72 +3722,84 @@
   /* ---------- 学校管理 ---------- */
   function renderAdmin() {
     const requestedTab = state.query.tab || 'members';
-    const tab = ['members', 'classes', 'notices', 'permissions'].includes(requestedTab) ? requestedTab : 'members';
-    const tabs = [['members', '成员管理'], ['classes', '班级管理'], ['notices', '公告管理'], ['permissions', '权限设置']];
+    const isAdmin = state.role === 'admin';
+    const isAcademic = state.role === 'academic';
+    const isTeacher = state.role === 'teacher';
+    const allowedTabs = isTeacher ? ['members', 'classes'] : isAcademic ? ['members', 'classes', 'notices'] : ['members', 'classes', 'notices', 'permissions'];
+    const tab = allowedTabs.includes(requestedTab) ? requestedTab : 'members';
+    const tabs = [['members', isTeacher ? '本班成员' : isAcademic ? '师生成员' : '成员管理'], ['classes', isTeacher ? '我的班级' : '班级管理']];
+    if (!isTeacher) tabs.push(['notices', '公告管理']);
+    if (isAdmin || isAcademic) tabs.push(['permissions', '权限设置']);
+    const scopeTitle = isAdmin ? '管理端' : isAcademic ? '教务处 · 校级管理' : '老师 · 班级管理';
+    const scopeDesc = isAdmin ? '管理全校组织、账号、班级、公告与权限' : isAcademic ? '管理本校教师、学生、班级与教务协同数据' : '只管理本人任教班级，可导入和维护本班学生';
+    const inviteOptions = isAdmin ? '<option value="academic">教务处</option><option value="teacher">老师</option><option value="student">学生</option>' : isAcademic ? '<option value="teacher">老师</option><option value="student">学生</option>' : '<option value="student">学生</option>';
+    const roleOptions = isAdmin ? '教务处 / 教师 / 学生' : isAcademic ? '教师 / 学生' : '本班学生';
     const head =
-      '<div class="page-head"><div><h1 class="page-title">学校管理</h1><p class="page-sub">管理本权限范围内的成员、班级、公告与学校服务</p></div><div class="page-head-actions"><button class="btn btn-outline" id="admin-network-open">网络接入</button><button class="btn btn-outline" id="admin-ai-open">AI 服务状态</button></div></div>' +
+      '<div class="page-head"><div><span class="page-kicker">' + scopeTitle + '</span><h1 class="page-title">' + (isAdmin ? '管理中枢' : isAcademic ? '教务处工作台' : '班级管理') + '</h1><p class="page-sub">' + scopeDesc + '</p></div><div class="page-head-actions"><button class="btn btn-outline" id="admin-network-open">网络接入</button><button class="btn btn-outline" id="admin-ai-open">AI 服务状态</button></div></div>' +
       '<div class="admin-tabs">' + tabs.map(t =>
         '<button class="admin-tab' + (tab === t[0] ? ' active' : '') + '" data-atab="' + t[0] + '">' + esc(t[1]) + '</button>').join('') + '</div>';
 
     let body = '';
     if (tab === 'members') {
-      const all = DB.users();
+      const all = scopedUsers();
       const students = all.filter(u => u.role === 'student');
       const teachers = all.filter(u => u.role === 'teacher');
-      const admins = all.filter(u => u.role === 'admin');
+      const academics = all.filter(u => u.role === 'academic');
       body = '<div class="card" style="margin-bottom:14px"><div class="filter-bar" style="flex-wrap:wrap">' +
-        '<div class="search-box" style="flex:1;min-width:200px"><span class="search-icon">' + icon('search', 15) + '</span><input class="input" id="m-search" placeholder="搜索姓名 / 手机号"></div>' +
-        '<button class="btn btn-primary" id="import-m">' + icon('upload', 15) + '导入学生/教师（CSV）</button>' +
+        '<div class="search-box" style="flex:1;min-width:200px"><span class="search-icon">' + icon('search', 15) + '</span><input class="input" id="m-search" placeholder="搜索姓名 / 脱敏手机号"></div>' +
+        '<button class="btn btn-primary" id="import-m">' + icon('upload', 15) + '导入' + roleOptions + '（CSV）</button>' +
         '<button class="btn btn-outline" id="tpl-m">' + icon('download', 15) + '下载模板</button>' +
         '<button class="btn btn-outline" id="export-m">' + icon('export', 15) + '导出成员</button>' +
         '<button class="btn btn-ghost" id="invite-m">添加一个</button></div>' +
         '<div class="learn-strip" style="margin-top:12px">' +
         '<div class="learn-stat"><div class="ls-num">' + students.length + '</div><div class="ls-label">学生账号</div></div>' +
         '<div class="learn-stat"><div class="ls-num">' + teachers.length + '</div><div class="ls-label">教师账号</div></div>' +
+        (isAdmin || isAcademic ? '<div class="learn-stat"><div class="ls-num">' + academics.length + '</div><div class="ls-label">教务处账号</div></div>' : '') +
         '<div class="learn-stat"><div class="ls-num">' + all.filter(u => u.status === '待激活').length + '</div><div class="ls-label">待首次登录激活</div></div>' +
         '<div class="learn-stat"><div class="ls-num">' + all.filter(u => u.status === '正常').length + '</div><div class="ls-label">已激活</div></div>' +
-        '</div></div>' +
+        '</div><div class="security-banner"><span class="status-dot green"></span><div><b>账号安全保护已启用</b><span>密码仅保存为哈希；姓名、手机号、班级和学校归属写入加密快照，列表默认只显示脱敏手机号。</span></div></div></div>' +
         '<div class="card" style="padding:0"><div class="table-wrap"><table class="tbl">' +
-        '<thead><tr><th>姓名</th><th>角色</th><th>年级 / 班级</th><th>手机号</th><th>状态</th><th>激活时间</th><th style="width:190px">操作</th></tr></thead><tbody>' +
-        (students.length || teachers.length ? all.map(m =>
+        '<thead><tr><th>姓名</th><th>角色</th><th>学校 / 年级 / 班级</th><th>手机号（脱敏）</th><th>状态</th><th>激活时间</th><th style="width:190px">操作</th></tr></thead><tbody>' +
+        (all.length ? all.map(m =>
           '<tr><td style="font-weight:600;color:var(--ink)">' + esc(m.name) + '</td>' +
-          '<td><span class="tag ' + (m.role === 'admin' ? 'tag-blue' : m.role === 'teacher' ? 'tag-green' : 'tag-gray') + '">' + (m.role === 'admin' ? '管理员' : m.role === 'teacher' ? '教师' : '学生') + '</span></td>' +
-          '<td>' + esc(m.grade || '—') + (m.cls ? ' · ' + esc(m.cls) : '') + '</td><td class="num">' + esc(m.phone) + '</td>' +
+          '<td><span class="tag ' + (m.role === 'admin' ? 'tag-blue' : m.role === 'academic' ? 'tag-violet' : m.role === 'teacher' ? 'tag-green' : 'tag-gray') + '">' + esc(roleLabel(m.role)) + '</span></td>' +
+          '<td>' + esc(m.schoolName || m.schoolId || '本校') + ' · ' + esc(m.grade || '—') + (m.cls ? ' · ' + esc(m.cls) : '') + '</td><td class="num">' + esc(maskPhone(m.phone)) + '</td>' +
           '<td>' + (m.status === '正常' ? '<span class="tag tag-green">' + icon('check', 12) + '已激活</span>' : m.status === '待激活' ? '<span class="tag tag-gold">待激活</span>' : '<span class="tag tag-red">已禁用</span>') + '</td>' +
           '<td class="num" style="color:var(--text-2)">' + (m.activatedAt ? esc(m.activatedAt.slice(0, 10)) : '—') + '</td>' +
           '<td><div style="display:flex;gap:4px;flex-wrap:wrap">' +
-          (m.role === 'admin'
+          (m.role === 'admin' || !DB.canManageRole(state.user, m.role)
             ? '<span class="tag tag-gray">内置</span>'
             : '<button class="btn btn-ghost btn-sm" data-act="disable" data-id="' + m.id + '">' + (m.status === '已禁用' ? '启用' : '禁用') + '</button>' +
               '<button class="btn btn-ghost btn-sm" data-act="reset" data-id="' + m.id + '">重置</button>' +
               '<button class="btn btn-ghost btn-sm" style="color:var(--red)" data-act="del" data-id="' + m.id + '">删除</button>') +
           '</div></td></tr>'
         ).join('') : '<tr><td colspan="7"><div class="empty-state" style="padding:26px 0">' + icon('members', 26) +
-          '<div style="margin-bottom:10px">还没有学生 / 教师账号</div>' +
+          '<div style="margin-bottom:10px">当前权限范围内还没有成员</div>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">' +
           '<button class="btn btn-primary" id="empty-import">' + icon('upload', 15) + '立即导入学生/教师表格</button>' +
           '<button class="btn btn-outline" id="empty-tpl">' + icon('download', 15) + '先下载模板</button>' +
           '</div></div></td></tr>') +
         '</tbody></table></div></div>' +
-        '<p class="form-hint" style="margin-top:10px">导入规则：表格需含「姓名 / 手机号 / 角色」三列（可加「年级 / 班级/部门」），表头支持常见别名（姓名/名字、手机号/手机/电话 等），支持 CSV / 分号 / Tab 分隔；角色填「学生」或「教师」；初始密码为手机号后 6 位，首次登录设置新密码即正式激活。</p>';
+        '<p class="form-hint" style="margin-top:10px">当前层级：' + esc(scopeDesc) + '。导入规则：表格需含「姓名 / 手机号 / 角色」三列，可加「年级 / 班级/部门 / 学校ID / 教务处ID」；密码只生成哈希，账号个人字段会以加密快照保存，页面只显示脱敏手机号。</p>';
     } else if (tab === 'classes') {
-      const all = DB.users();
+      const all = scopedUsers();
       const clsMap = {};
       all.forEach(u => {
         const k = u.cls || '未分班';
-        clsMap[k] = clsMap[k] || { students: 0, teachers: [] };
+        clsMap[k] = clsMap[k] || { students: 0, teachers: [], schoolId: u.schoolId || currentSchoolId() };
         if (u.role === 'student') clsMap[k].students++;
         if (u.role === 'teacher') clsMap[k].teachers.push(u.name);
       });
-      const names = Object.keys(clsMap);
-      body = '<div class="class-cards">' +
+      (scopedClasses() || []).forEach(c => { if (!clsMap[c.name]) clsMap[c.name] = { students: (c.studentIds || []).length, teachers: [], schoolId: c.schoolId }; });
+      const names = Object.keys(clsMap).filter(name => name !== '未分班');
+      body = '<div class="page-head compact"><div><h2 class="section-title">' + (isTeacher ? '我的班级' : '班级组织') + '</h2><p class="page-sub">' + (isTeacher ? '仅展示本人任教班级及本班学生' : '学校 → 教务处 → 班级 → 师生，所有归属变更都会留下记录') + '</p></div><button class="btn btn-primary" id="class-create">' + icon('plus', 15) + '新建班级</button></div><div class="class-cards">' +
         (names.length ? names.map(c =>
           '<div class="class-card"><div class="cc-name">' + esc(c) + '</div>' +
-          '<div class="cc-meta">' + clsMap[c].students + ' 名学生 · 教师：' + esc(clsMap[c].teachers.join('、') || '—') + '</div>' +
+          '<div class="cc-meta">' + esc(clsMap[c].schoolId || currentSchoolId()) + ' · ' + clsMap[c].students + ' 名学生 · 教师：' + esc(clsMap[c].teachers.join('、') || '—') + '</div>' +
           '<div style="display:flex;justify-content:space-between;align-items:center">' +
-          '<span class="tag tag-green">' + icon('check', 12) + '进行中</span>' +
+          '<span class="tag tag-green">' + icon('check', 12) + (isTeacher ? '任教中' : '运行中') + '</span>' +
           '<button class="btn btn-ghost btn-sm" data-nav="#/admin?tab=members">管理成员</button></div></div>'
-        ).join('') : '<div class="class-card" style="grid-column:1/-1"><div class="empty-state" style="padding:20px">' + icon('class', 26) + '<div>导入学生/教师表格后，这里会自动按「班级/部门」生成班级卡片</div></div></div>') +
+        ).join('') : '<div class="class-card" style="grid-column:1/-1"><div class="empty-state" style="padding:20px">' + icon('class', 26) + '<div>导入成员或新建班级后，这里会生成组织卡片</div></div></div>') +
         '</div>';
     } else if (tab === 'notices') {
       const announcements = DB.notices();
@@ -3726,19 +3810,39 @@
       body = '<div class="announcement-admin-hero"><div><span>学校协同</span><h2>公告发布中心</h2><p>面向全校、教师、学生或管理员发布消息，并管理草稿、有效期和撤回状态。</p></div><button class="btn btn-primary" id="announcement-create">' + icon('plus', 16) + ' 发布新公告</button></div><div class="announcement-stats"><div><strong>' + published + '</strong><span>当前发布</span></div><div><strong>' + drafts + '</strong><span>草稿</span></div><div><strong>' + withdrawn + '</strong><span>撤回 / 过期</span></div></div><div class="announcement-admin-list">' + (announcements.length ? announcements.map(n => { const nStatus = n.status || '已发布'; const expired = n.expiresAt && n.expiresAt < nowKey; return '<article class="announcement-admin-item' + noticePriorityClass(n) + '"><div class="announcement-admin-main"><div class="announcement-admin-title"><span class="announcement-status status-' + (expired ? 'expired' : nStatus === '已发布' ? 'published' : nStatus === '草稿' ? 'draft' : 'withdrawn') + '">' + (expired ? '已过期' : esc(nStatus)) + '</span><span class="announcement-priority">' + esc(n.priority || '普通') + '</span><b>' + esc(noticeTitle(n)) + '</b></div><p>' + esc(n.text) + '</p><small>' + esc(n.scope || '全校') + ' · ' + esc(n.publisher || '系统') + ' · 创建于 ' + esc((n.createdAt || '').slice(0, 16).replace('T',' ')) + (n.expiresAt ? ' · 有效至 ' + esc(n.expiresAt) : '') + '</small></div><div class="announcement-admin-actions"><button class="btn btn-outline btn-sm" data-announcement-action="edit" data-id="' + esc(n.id) + '">编辑</button>' + (nStatus === '已发布' ? '<button class="btn btn-ghost btn-sm" data-announcement-action="withdraw" data-id="' + esc(n.id) + '">撤回</button>' : '<button class="btn btn-primary btn-sm" data-announcement-action="publish" data-id="' + esc(n.id) + '">发布</button>') + '<button class="btn btn-ghost btn-sm danger-text" data-announcement-action="delete" data-id="' + esc(n.id) + '">删除</button></div></article>'; }).join('') : '<div class="card"><div class="empty-state" style="padding:34px 0">' + icon('notice', 30) + '<div>还没有公告。可先发布一条全校通知，或保存为草稿。</div></div></div>') + '</div>';
     } else if (tab === 'permissions') {
       body = '<div class="card" style="padding:0"><div class="table-wrap"><table class="tbl">' +
-        '<thead><tr><th>权限项</th><th style="text-align:center">教师</th><th style="text-align:center">管理员</th></tr></thead><tbody>' +
+        '<thead><tr><th>权限项</th><th style="text-align:center">老师</th><th style="text-align:center">教务处</th><th style="text-align:center">管理端</th></tr></thead><tbody>' +
         M.permissions.map(p =>
           '<tr><td style="font-weight:500">' + esc(p.action) + '</td>' +
-          [p.teacher, p.admin].map(v => '<td style="text-align:center">' + (v ? '<span style="color:var(--green)">' + icon('check', 16) + '</span>' : '<span style="color:var(--text-3)">—</span>') + '</td>').join('') +
+          [p.teacher, p.academic, p.admin].map(v => '<td style="text-align:center">' + (v ? '<span style="color:var(--green)">' + icon('check', 16) + '</span>' : '<span style="color:var(--text-3)">—</span>') + '</td>').join('') +
           '</tr>'
         ).join('') +
         '</tbody></table></div></div>' +
-        '<p class="form-hint" style="margin:10px 0 0">教师可命题、批改、贡献资料；管理员另可管理成员、班级和权限。AI 学习能力不按角色或付费等级区分。</p>';
+        '<div class="hierarchy-guide"><div><b>管理级</b><span>管理端可跨学校查看与治理账号、组织和服务。</span></div><div><b>校级</b><span>教务处只管理本校，可导入老师与学生、维护班级。</span></div><div><b>班级级</b><span>老师只管理本人任教班级，可导入学生并处理本班教学数据。</span></div></div>';
     }
     renderPage('<div class="page">' + head + body + '</div>');
 
     if ($('#admin-ai-open')) $('#admin-ai-open').onclick = openAISettings;
     if ($('#admin-network-open')) $('#admin-network-open').onclick = openNetworkSettings;
+
+    const classCreate = $('#class-create');
+    if (classCreate) classCreate.onclick = () => {
+      const root = $('#dialog-root');
+      root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:440px" role="dialog" aria-modal="true"><h3 class="dialog-title">新建班级</h3><p class="dialog-body">班级会自动归入“' + esc(isAdmin ? '全校' : isAcademic ? '本校' : '本人任教范围') + '”，之后可通过成员导入绑定学生与老师。</p><div class="field"><label>班级名称<span class="req">*</span></label><input class="input" id="new-class-name" placeholder="如：七（1）班"></div><div class="field"><label>年级</label><input class="input" id="new-class-grade" placeholder="如：七年级"></div><div class="dialog-actions"><button class="btn btn-ghost" data-class-cancel>取消</button><button class="btn btn-primary" data-class-save>创建班级</button></div></div></div>';
+      const close = () => { root.innerHTML = ''; };
+      root.querySelector('[data-class-cancel]').onclick = close;
+      root.querySelector('.dialog-mask').onclick = e => { if (e.target === e.currentTarget) close(); };
+      root.querySelector('[data-class-save]').onclick = () => {
+        const name = root.querySelector('#new-class-name').value.trim();
+        const grade = root.querySelector('#new-class-grade').value.trim();
+        const result = DB.addClass({ name: name, grade: grade }, state.user);
+        if (!result.ok) { showToast(result.msg || '班级创建失败', 'error'); return; }
+        DB.auditLog('创建班级', name + '（' + (grade || '年级待补充') + '）', state.user && state.user.name);
+        close();
+        showToast('班级已创建，可继续导入成员', 'success');
+        renderAdmin();
+      };
+      root.querySelector('#new-class-name').focus();
+    };
 
     const announcementCreate = $('#announcement-create');
     if (announcementCreate) announcementCreate.onclick = () => openNoticeEditor();
@@ -3762,7 +3866,7 @@
         body: '确定' + (u.status === '已禁用' ? '启用' : '禁用') + ' <b>' + esc(u.name) + '</b> 吗？' + (u.status === '已禁用' ? '' : '禁用后无法登录，操作会记录审计日志。'),
         danger: u.status !== '已禁用', okText: u.status === '已禁用' ? '启用' : '禁用',
         onConfirm: () => {
-          const r = DB.updateUser(u.id, { status: u.status === '已禁用' ? '正常' : '已禁用' });
+          const r = DB.updateUser(u.id, { status: u.status === '已禁用' ? '正常' : '已禁用' }, state.user);
           DB.auditLog(u.status === '已禁用' ? '启用成员' : '禁用成员', u.name + '（' + u.phone + '）', state.user && state.user.name);
           showToast((r.ok ? (u.status === '已禁用' ? '已启用 ' : '已禁用 ') + u.name : '操作失败'), r.ok ? 'success' : 'error');
           renderAdmin();
@@ -3773,7 +3877,7 @@
         body: '将 <b>' + esc(u.name) + '</b> 的密码重置为手机号后 6 位，状态回到「待激活」，需首次登录重新设置密码。',
         danger: true, okText: '确认重置',
         onConfirm: () => {
-          const r = DB.resetPassword(u.id);
+          const r = DB.resetPassword(u.id, state.user);
           DB.auditLog('重置密码', u.name + '（' + u.phone + '）', state.user && state.user.name);
           showToast(r.ok ? '已重置 ' + u.name + ' 的密码，等待重新激活' : r.msg, r.ok ? 'success' : 'error');
           renderAdmin();
@@ -3784,7 +3888,7 @@
         body: '确定删除 <b>' + esc(u.name) + '</b>（' + esc(u.phone) + '）吗？删除后不可恢复。',
         danger: true, okText: '删除',
         onConfirm: () => {
-          const r = DB.removeUser(u.id);
+          const r = DB.removeUser(u.id, state.user);
           DB.auditLog('删除成员', u.name + '（' + u.phone + '）', state.user && state.user.name);
           showToast(r.ok ? '已删除 ' + u.name : r.msg, r.ok ? 'success' : 'error');
           renderAdmin();
@@ -3801,13 +3905,13 @@
     };
     $('#import-m') && ($('#import-m').onclick = () => {
       const root = $('#dialog-root');
-      root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:560px"><h3 class="dialog-title">导入学生 / 教师（CSV，Excel 可打开）</h3>' +
+      root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:560px"><h3 class="dialog-title">导入' + roleOptions + '（CSV，Excel 可打开）</h3>' +
         '<div class="dialog-body">' +
-        '<p class="form-hint" style="margin-top:0">把 Excel / WPS 里的名单粘贴到下方（或选择 CSV / TXT 文件）。表头支持常见别名，例如：姓名 / 名字，手机号 / 手机 / 电话，角色，年级，班级/部门。</p>' +
+        '<p class="form-hint" style="margin-top:0">把 Excel / WPS 里的名单粘贴到下方（或选择 CSV / TXT 文件）。本次导入范围：<b>' + roleOptions + '</b>。表头支持：姓名、手机号、角色、年级、班级/部门、学校ID、教务处ID。</p>' +
         '<textarea class="textarea" id="im-text" style="min-height:150px" placeholder="姓名,手机号,角色,年级,班级/部门&#10;张小明,13800000001,学生,七年级,七（1）班&#10;李小红,13800000002,学生,七年级,七（1）班&#10;王老师,13800000003,教师,七年级,七（1）班"></textarea>' +
         '<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><input type="file" id="im-file" accept=".csv,.txt,.tsv" style="flex:1;font-size:12px">' +
         '<button class="btn btn-outline btn-sm" id="im-fill-demo">填入示例</button></div>' +
-        '<p class="form-hint" style="margin:8px 0 0">导入后账号为「待激活」，初始密码为手机号后 6 位；首次登录设置新密码即正式激活。</p>' +
+        '<p class="form-hint" style="margin:8px 0 0">导入后账号为「待激活」，密码只保存为哈希；姓名、手机号、班级等字段进入加密存储，页面默认仅显示脱敏手机号。</p>' +
         '</div>' +
         '<div class="dialog-actions"><button class="btn btn-ghost" data-dialog="cancel">取消</button>' +
         '<button class="btn btn-primary" data-dialog="ok">导入</button></div></div></div>';
@@ -3826,7 +3930,7 @@
       root.querySelector('[data-dialog="cancel"]').onclick = () => { root.innerHTML = ''; };
       root.querySelector('.dialog-mask').addEventListener('click', e => { if (e.target === e.currentTarget) root.innerHTML = ''; });
       root.querySelector('[data-dialog="ok"]').onclick = () => {
-        const res = DB.importRosterCSV(root.querySelector('#im-text').value);
+        const res = DB.importRosterCSV(root.querySelector('#im-text').value, state.user);
         root.innerHTML = '';
         if (res.ok) {
           DB.auditLog('导入成员', res.msg + (res.skipped && res.skipped.length ? '；跳过：' + res.skipped.join('；') : ''), state.user && state.user.name);
@@ -3871,7 +3975,7 @@
       root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:440px"><h3 class="dialog-title">添加成员</h3>' +
         '<div class="dialog-body">' +
         '<div class="field"><label>姓名<span class="req">*</span></label><input class="input" id="nm-name" placeholder="姓名"></div>' +
-        '<div class="field"><label>角色</label><select class="select" id="nm-role"><option value="student">学生</option><option value="teacher">教师</option></select></div>' +
+        '<div class="field"><label>角色</label><select class="select" id="nm-role">' + inviteOptions + '</select></div>' +
         '<div class="field"><label>年级</label><input class="input" id="nm-grade" placeholder="如：七年级"></div>' +
         '<div class="field"><label>班级 / 部门</label><input class="input" id="nm-cls" placeholder="如：七（1）班"></div>' +
         '<div class="field"><label>手机号<span class="req">*</span></label><input class="input" id="nm-phone" placeholder="11 位手机号"></div>' +
@@ -3887,7 +3991,7 @@
           grade: $('#nm-grade').value.trim(),
           cls: $('#nm-cls').value.trim() || ($('#nm-role').value === 'student' ? '未分班' : '教师组'),
           phone: $('#nm-phone').value.trim()
-        });
+        }, state.user);
         root.innerHTML = '';
         if (r.ok) {
           DB.auditLog('添加成员', r.user.name + '（' + r.user.phone + '）', state.user && state.user.name);

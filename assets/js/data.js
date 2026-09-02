@@ -6,8 +6,9 @@ const ENGLISH_BOOKS = {"1":{"上":["Unit 1 Greetings","Unit 2 Body","Unit 3 Colo
 window.MOCK = {
 
   roles: {
-    teacher: { label: '教师', desc: '命题、批改、学情报告' },
-    admin:   { label: '管理员', desc: '成员、班级与权限管理' },
+    admin:   { label: '管理端', desc: '全校 / 全平台组织、权限与数据治理' },
+    academic:{ label: '教务处', desc: '校级排课、师生导入与班级运行' },
+    teacher: { label: '老师', desc: '班级教学、批改、学情与学生导入' },
     student: { label: '学生（轻量端）', desc: '作业反馈、资源浏览' }
   },
 
@@ -17,7 +18,16 @@ window.MOCK = {
       { key: 'paper', label: '命题组卷', route: '#/paper', icon: 'paper' },
       { key: 'grading', label: '批改中心', route: '#/grading', icon: 'grading' },
       { key: 'resources', label: '资源与语料', route: '#/resources', icon: 'book' },
-      { key: 'analytics', label: '学情报告', route: '#/analytics', icon: 'chart' }
+      { key: 'analytics', label: '学情报告', route: '#/analytics', icon: 'chart' },
+      { key: 'admin', label: '我的班级', route: '#/admin?tab=members', icon: 'members' }
+    ],
+    academic: [
+      { key: 'home', label: '首页', route: '#/home', icon: 'home' },
+      { key: 'paper', label: '命题组卷', route: '#/paper', icon: 'paper' },
+      { key: 'grading', label: '批改中心', route: '#/grading', icon: 'grading' },
+      { key: 'resources', label: '资源与语料', route: '#/resources', icon: 'book' },
+      { key: 'analytics', label: '校级学情', route: '#/analytics', icon: 'chart' },
+      { key: 'admin', label: '校级管理', route: '#/admin', icon: 'school' }
     ],
     admin: [
       { key: 'home', label: '首页', route: '#/home', icon: 'home' },
@@ -209,14 +219,16 @@ window.MOCK = {
   },
 
   permissions: [
-    { action: '命题 / 组卷', teacher: true, researcher: true, admin: true },
-    { action: 'AI 出题', teacher: true, researcher: true, admin: true },
-    { action: '批改复核与评分修正', teacher: true, researcher: true, admin: false },
-    { action: '跨班级学情查看', teacher: false, researcher: true, admin: true },
-    { action: '导出成绩单 / 报告', teacher: true, researcher: true, admin: true },
-    { action: '成员 / 班级 / 权限管理', teacher: false, researcher: false, admin: true },
-    { action: '发布 / 编辑 / 撤回学校公告', teacher: false, researcher: false, admin: true },
-    { action: '查看未授权资源', teacher: false, researcher: false, admin: true }
+    { action: '命题 / 组卷', teacher: true, academic: true, admin: true },
+    { action: 'AI 出题', teacher: true, academic: true, admin: true },
+    { action: '批改复核与评分修正', teacher: true, academic: true, admin: false },
+    { action: '跨班级学情查看', teacher: false, academic: true, admin: true },
+    { action: '导出成绩单 / 报告', teacher: true, academic: true, admin: true },
+    { action: '导入学生账号', teacher: true, academic: true, admin: true },
+    { action: '导入教师账号', teacher: false, academic: true, admin: true },
+    { action: '成员 / 班级 / 权限管理', teacher: true, academic: true, admin: true },
+    { action: '发布 / 编辑 / 撤回学校公告', teacher: false, academic: true, admin: true },
+    { action: '查看未授权资源', teacher: false, academic: false, admin: true }
   ],
 
   guides: [

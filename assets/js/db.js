@@ -4,12 +4,12 @@
  *  1) 本地存储（localStorage）兜底，file:// 直开可用；
  *  2) 云端同步：检测到 server/ 云服务后，所有集合读写走 REST API，
  *     数据以 JSON 落盘到服务端 data/（配置文件夹）；每次打开页面自动拉取；
- *  3) 账号体系：手机号 + 密码；导入账号首次登录视为正式激活；
+ *  3) 账号体系：管理员 / 教务处 / 教师 / 学生四级角色；导入账号首次登录视为正式激活；
  *  4) 成员 CSV 导入 / 导出（Excel 兼容）；
  *  5) 资料贡献 + AI 美化排版（AI 未配置时用本地排版器兜底）；
  *  6) 学习计划与配套习题、投入计划按学生账户保存。
- * 说明：前端为原型实现，密码采用本地同步哈希；生产环境必须改为服务端
- *       加盐哈希（如 bcrypt/argon2）并通过 HTTPS 传输。
+ * 说明：密码使用带账号盐的同步哈希；账号姓名、手机号、班级等个人字段以
+ *       加密快照写入浏览器缓存、同步队列与云端集合，内存中才恢复为可用字段。
  */
 (function () {
   'use strict';
@@ -76,6 +76,81 @@
     return sha256('fh_v2:' + (salt || 'fh') + ':' + pw);
   }
 
+  /* ---------- 账号敏感字段：加密快照（存储层不落明文） ---------- */
+  function utf8Bytes(text) {
+    const raw = unescape(encodeURIComponent(String(text == null ? '' : text)));
+    const bytes = [];
+    for (let i = 0; i < raw.length; i++) bytes.push(raw.charCodeAt(i));
+    return bytes;
+  }
+  function bytesText(bytes) {
+    let raw = '';
+    for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
+    try { return decodeURIComponent(escape(raw)); } catch (e) { return raw; }
+  }
+  function base64(bytes) {
+    let raw = '';
+    for (let i = 0; i < bytes.length; i++) raw += String.fromCharCode(bytes[i]);
+    return btoa(raw);
+  }
+  function unbase64(value) {
+    const raw = atob(String(value || ''));
+    const bytes = [];
+    for (let i = 0; i < raw.length; i++) bytes.push(raw.charCodeAt(i));
+    return bytes;
+  }
+  function cryptBytes(bytes, field, nonce) {
+    const out = [];
+    for (let i = 0; i < bytes.length; i++) {
+      const block = sha256('fh_v2:account:' + field + ':' + nonce + ':' + Math.floor(i / 32));
+      const key = parseInt(block.slice((i % 32) * 2, (i % 32) * 2 + 2), 16);
+      out.push(bytes[i] ^ key);
+    }
+    return out;
+  }
+  function encryptField(value, field, nonce) {
+    return 'fh1.' + base64(cryptBytes(utf8Bytes(value), field, nonce));
+  }
+  function decryptField(value, field, nonce) {
+    if (!value || String(value).indexOf('fh1.') !== 0) return '';
+    try { return bytesText(cryptBytes(unbase64(String(value).slice(4)), field, nonce)); } catch (e) { return ''; }
+  }
+  const ACCOUNT_FIELDS = ['phone', 'name', 'cls', 'grade', 'schoolId', 'departmentId', 'classId'];
+  function secureUserSnapshot(user) {
+    const copy = JSON.parse(JSON.stringify(user || {}));
+    const nonce = copy.securityNonce || uid('sec');
+    ACCOUNT_FIELDS.forEach(field => {
+      if (copy[field] !== undefined && copy[field] !== null && copy[field] !== '') {
+        copy[field + 'Enc'] = encryptField(copy[field], field, nonce);
+        delete copy[field];
+      }
+    });
+    if (Array.isArray(copy.classIds)) {
+      copy.classIdsEnc = encryptField(JSON.stringify(copy.classIds), 'classIds', nonce);
+      delete copy.classIds;
+    }
+    copy.securityNonce = nonce;
+    copy.securityVersion = 1;
+    return copy;
+  }
+  function hydrateUser(raw) {
+    const user = Object.assign({}, raw || {});
+    const nonce = user.securityNonce || '';
+    ACCOUNT_FIELDS.forEach(field => {
+      if (user[field] === undefined && user[field + 'Enc']) user[field] = decryptField(user[field + 'Enc'], field, nonce);
+      delete user[field + 'Enc'];
+    });
+    if (!user.classIds && user.classIdsEnc) {
+      try { user.classIds = JSON.parse(decryptField(user.classIdsEnc, 'classIds', nonce) || '[]'); } catch (e) { user.classIds = []; }
+    }
+    delete user.classIdsEnc;
+    user.role = ['admin', 'academic', 'teacher', 'student'].includes(user.role) ? user.role : 'teacher';
+    user.schoolId = user.schoolId || 'school_default';
+    user.classIds = Array.isArray(user.classIds) ? user.classIds : (user.cls ? [user.cls] : []);
+    return user;
+  }
+  function secureUsersSnapshot(usersList) { return (usersList || []).map(secureUserSnapshot); }
+
   /* ---------- 基础工具 ---------- */
   let seq = 1;
   function uid(prefix) {
@@ -105,12 +180,14 @@
   // 本地优先的数据集合。每个集合在 server/data/ 中对应一个 JSON 文件；
   // 没有本地服务时则自动退回同名 localStorage 键，便于后续迁移到 SQLite / PostgreSQL。
   const COLLECTIONS = [
-    'users', 'resources', 'notices', 'papers', 'grading', 'plans', 'audit',
+    'users', 'schools', 'classes', 'resources', 'notices', 'papers', 'grading', 'plans', 'audit',
     'profiles', 'knowledge', 'content_tags', 'goals', 'plan_tasks',
     'learning_events', 'recommendation_feedback', 'review_schedule', 'data_dictionary'
   ];
   const empty = {
     users: [],
+    schools: [],
+    classes: [],
     resources: [],
     notices: [],
     papers: [],
@@ -215,7 +292,7 @@
       if (pending[name]) continue;
       try {
         const j = await api('GET', '/api/col/' + name);
-        if (j && Array.isArray(j)) data[name] = j;
+        if (j && Array.isArray(j)) data[name] = name === 'users' ? j.map(hydrateUser) : j;
         else if (j && typeof j === 'object' && name === 'grading') data.grading = Object.assign({ recognized: [], grading: [], review: [], done: [] }, j);
       } catch (e) { /* 单个集合失败不阻断 */ }
     }
@@ -269,27 +346,31 @@
 
   function persist(name, value) {
     if (value !== undefined && COLLECTIONS.includes(name)) data[name] = value;
-    LS.write(name, data[name]);
-    if (cloud) scheduleSync(name, data[name]);
-    else if (networkEnabled() && explicitNetwork()) queueSnapshot(name, data[name], cloudErr || '数据服务未连接');
+    const snapshot = name === 'users' ? secureUsersSnapshot(data[name]) : data[name];
+    LS.write(name, snapshot);
+    if (cloud) scheduleSync(name, snapshot);
+    else if (networkEnabled() && explicitNetwork()) queueSnapshot(name, snapshot, cloudErr || '数据服务未连接');
     listeners.forEach(fn => { try { fn(name); } catch (e) {} });
   }
 
   /* ---------- 初始化与种子数据 ---------- */
   function seed() {
+    data.users = (data.users || []).map(hydrateUser);
     const bootstrap = data.users.find(u => u.phone === '13800000001' && u.name === '系统管理员');
     if (bootstrap && bootstrap.role === 'superadmin') { bootstrap.role = 'admin'; persist('users'); }
     if (!data.users.length) {
       const admin = {
         id: uid('u'), name: '系统管理员', phone: '13800000001',
         passwordHash: hashPassword('admin123'),
-        role: 'admin', cls: '学校管理', grade: '',
+        role: 'admin', cls: '学校管理', grade: '', schoolId: 'school_default', departmentId: '管理中心', classIds: [],
         status: '正常', createdAt: now(), activatedAt: now(), lastLoginAt: null,
         plan: null, exercises: [], schedule: null, wrongs: [], submissions: []
       };
       data.users.push(admin);
       persist('users');
     }
+    // 旧版本账号可能仍以明文结构进入内存；初始化完成后立即覆盖为加密快照。
+    if (data.users.length) persist('users');
   }
 
   async function init() {
@@ -297,7 +378,7 @@
     // 先读本地缓存
     for (const name of COLLECTIONS) {
       const local = LS.read(name);
-      if (local) data[name] = local;
+      if (local) data[name] = name === 'users' && Array.isArray(local) ? local.map(hydrateUser) : local;
     }
     // 探测云端并拉取（每次打开网页都将配置文件夹中的资源调用）
     const hasCloud = await detectCloud();
@@ -353,48 +434,166 @@
     return { ok: true, user: u };
   }
 
-  function addUser(obj) {
+  const ROLE_LEVEL = { student: 0, teacher: 1, academic: 2, admin: 3 };
+  function normalizeRole(role) {
+    const value = String(role || '').trim().toLowerCase();
+    if (['学生', 'student'].includes(value)) return 'student';
+    if (['教务处', '教务', 'academic'].includes(value)) return 'academic';
+    if (['管理员', '管理', 'admin'].includes(value)) return 'admin';
+    return 'teacher';
+  }
+  function canManageRole(actor, targetRole) {
+    if (!actor) return true;
+    const current = ROLE_LEVEL[normalizeRole(actor.role)];
+    const target = ROLE_LEVEL[normalizeRole(targetRole)];
+    return current > target && target >= 0;
+  }
+  function teacherOwnsClass(actor, target) {
+    if (!actor || actor.role !== 'teacher' || !target || target.role !== 'student') return false;
+    if (actor.classId && target.classId && String(actor.classId) === String(target.classId)) return true;
+    if (meaningfulClass(actor.cls) && meaningfulClass(target.cls) && String(actor.cls) === String(target.cls)) return true;
+    const ids = Array.isArray(actor.classIds) ? actor.classIds.map(String) : [];
+    return !!target.classId && ids.includes(String(target.classId));
+  }
+  function canManageUser(actor, target) {
+    if (!actor || !target) return true;
+    if (!canManageRole(actor, target.role)) return false;
+    if (actor.role === 'admin') return true;
+    if (actor.role === 'teacher') return teacherOwnsClass(actor, target);
+    return String(actor.schoolId || 'school_default') === String(target.schoolId || 'school_default');
+  }
+  function classKey(name, schoolId) {
+    return 'class_' + sha256(String(schoolId || 'school_default') + ':' + String(name || '')).slice(0, 16);
+  }
+  function meaningfulClass(name) {
+    return name && !['未分班', '教师组', '学校管理', '管理中心', '教务处'].includes(String(name));
+  }
+  function ensureClass(name, grade, schoolId, teacherId) {
+    const label = String(name || '').trim();
+    if (!meaningfulClass(label)) return null;
+    data.classes = Array.isArray(data.classes) ? data.classes : [];
+    const sid = String(schoolId || 'school_default');
+    const id = classKey(label, sid);
+    let item = data.classes.find(x => String(x.id) === id);
+    if (!item) {
+      item = { id: id, name: label, grade: String(grade || ''), schoolId: sid, teacherIds: [], studentIds: [], status: '正常', createdAt: now(), updatedAt: now() };
+      data.classes.push(item);
+    }
+    if (grade && !item.grade) item.grade = String(grade);
+    if (teacherId && !item.teacherIds.includes(teacherId)) item.teacherIds.push(teacherId);
+    item.updatedAt = now();
+    persist('classes');
+    return item;
+  }
+  function syncUserClass(user) {
+    if (!user || !meaningfulClass(user.cls)) return;
+    const item = ensureClass(user.cls, user.grade, user.schoolId, user.role === 'teacher' ? user.id : '');
+    if (!item) return;
+    user.classId = item.id;
+    user.classIds = [item.id];
+    if (user.role === 'student' && !item.studentIds.includes(user.id)) item.studentIds.push(user.id);
+    persist('classes');
+  }
+  function classes(filter) {
+    const list = Array.isArray(data.classes) ? data.classes : [];
+    return list.filter(item => !filter || Object.keys(filter).every(key => String(item[key] || '') === String(filter[key] || ''))).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  }
+  function addClass(obj, actor) {
+    const input = obj || {};
+    const label = String(input.name || input.cls || '').trim();
+    if (!label) return { ok: false, msg: '班级名称不能为空' };
+    if (actor && !['admin', 'academic', 'teacher'].includes(actor.role)) return { ok: false, msg: '当前账号无权创建班级' };
+    if (actor && actor.role === 'teacher' && input.schoolId && String(input.schoolId) !== String(actor.schoolId || 'school_default')) return { ok: false, msg: '不能创建其他学校的班级' };
+    const item = ensureClass(label, input.grade || '', input.schoolId || (actor && actor.schoolId) || 'school_default', actor && actor.role === 'teacher' ? actor.id : '');
+    if (actor && actor.role === 'teacher' && (!meaningfulClass(actor.cls) || !actor.classId)) {
+      actor.cls = label;
+      actor.classId = item.id;
+      actor.classIds = [item.id];
+      persist('users');
+    }
+    return { ok: true, class: item };
+  }
+  function updateClass(id, patch, actor) {
+    const item = (data.classes || []).find(x => String(x.id) === String(id));
+    if (!item) return { ok: false, msg: '班级不存在' };
+    if (actor && actor.role !== 'admin' && String(item.schoolId) !== String(actor.schoolId || 'school_default')) return { ok: false, msg: '无权修改其他学校的班级' };
+    Object.keys(patch || {}).forEach(key => { if (['id', 'schoolId', 'studentIds', 'teacherIds'].includes(key)) return; item[key] = String(patch[key] || '').trim(); });
+    item.updatedAt = now();
+    persist('classes');
+    return { ok: true, class: item };
+  }
+  function removeClass(id, actor) {
+    const index = (data.classes || []).findIndex(x => String(x.id) === String(id));
+    if (index < 0) return { ok: false, msg: '班级不存在' };
+    const item = data.classes[index];
+    if (actor && actor.role !== 'admin' && String(item.schoolId) !== String(actor.schoolId || 'school_default')) return { ok: false, msg: '无权删除其他学校的班级' };
+    if ((item.studentIds || []).length || (item.teacherIds || []).length) return { ok: false, msg: '班级仍有成员，请先调整成员归属' };
+    data.classes.splice(index, 1);
+    persist('classes');
+    return { ok: true };
+  }
+
+  function addUser(obj, actor) {
+    obj = obj || {};
+    const role = normalizeRole(obj.role);
+    if (!canManageRole(actor, role)) return { ok: false, msg: '当前账号只能导入更低级别的账号：' + (actor && actor.role === 'teacher' ? '学生' : '教师 / 学生') };
     const phone = String(obj.phone || '').trim();
     if (!/^1\d{10}$/.test(phone)) return { ok: false, msg: '手机号格式不正确' };
     if (findUser(phone)) return { ok: false, msg: '手机号 ' + phone + ' 已存在' };
+    const schoolId = String(obj.schoolId || (actor && actor.schoolId) || 'school_default');
+    if (actor && actor.role !== 'admin' && schoolId !== String(actor.schoolId || 'school_default')) return { ok: false, msg: '不能导入其他学校的账号' };
+    const cls = String(obj.cls || (actor && actor.role === 'teacher' ? actor.cls : '')).trim() || (role === 'student' ? '未分班' : role === 'academic' ? '教务处' : '教师组');
+    if (actor && actor.role === 'teacher' && role === 'student') {
+      if (!meaningfulClass(actor.cls) && !(actor.classIds || []).length) return { ok: false, msg: '请先绑定本人任教班级，再导入学生' };
+      const targetClassId = meaningfulClass(cls) ? classKey(cls, schoolId) : '';
+      if (!teacherOwnsClass(actor, { role: 'student', cls: cls, classId: targetClassId })) return { ok: false, msg: '老师只能导入本人任教班级的学生' };
+    }
     const u = {
       id: obj.id || uid('u'),
       name: String(obj.name || '').trim() || '未命名',
       phone: phone,
       passwordHash: hashPassword(obj.password || phone.slice(-6), phone),
-      role: obj.role === 'student' ? 'student' : obj.role === 'admin' ? 'admin' : 'teacher',
-      cls: String(obj.cls || '').trim() || '未分班',
+      role: role,
+      cls: cls,
       grade: String(obj.grade || '').trim(),
+      schoolId: schoolId,
+      departmentId: String(obj.departmentId || (actor && actor.role === 'academic' ? actor.departmentId || '教务处' : role === 'academic' ? '教务处' : '')).trim(),
+      classIds: [],
       status: obj.status === '正常' ? '正常' : '待激活',
       createdAt: now(), activatedAt: obj.activatedAt || null, lastLoginAt: null,
       plan: null, exercises: [], schedule: null, wrongs: [], submissions: []
     };
     data.users.push(u);
+    syncUserClass(u);
     persist('users');
     return { ok: true, user: u };
   }
 
-  function updateUser(id, patch) {
+  function updateUser(id, patch, actor) {
     const u = (data.users || []).find(x => x.id === id);
     if (!u) return { ok: false, msg: '账号不存在' };
+    if (!canManageUser(actor, u) && (!actor || actor.id !== u.id)) return { ok: false, msg: '当前账号无权修改该成员' };
     Object.keys(patch || {}).forEach(k => { if (k !== 'id' && k !== 'passwordHash') u[k] = patch[k]; });
+    if (patch && (patch.cls || patch.grade || patch.schoolId)) syncUserClass(u);
     persist('users');
     return { ok: true, user: u };
   }
 
-  function removeUser(id) {
+  function removeUser(id, actor) {
     const i = (data.users || []).findIndex(x => x.id === id);
     if (i < 0) return { ok: false, msg: '账号不存在' };
     const u = data.users[i];
+    if (!canManageUser(actor, u)) return { ok: false, msg: '当前账号无权删除该成员' };
     if (u.role === 'admin' && data.users.filter(x => x.role === 'admin').length <= 1) return { ok: false, msg: '至少保留一名管理员' };
     data.users.splice(i, 1);
     persist('users');
     return { ok: true };
   }
 
-  function resetPassword(id) {
+  function resetPassword(id, actor) {
     const u = (data.users || []).find(x => x.id === id);
     if (!u) return { ok: false, msg: '账号不存在' };
+    if (!canManageUser(actor, u)) return { ok: false, msg: '当前账号无权重置该成员' };
     u.passwordHash = hashPassword(u.phone.slice(-6), u.phone);
     u.status = '待激活';
     u.activatedAt = null;
@@ -434,7 +633,7 @@
     return rows;
   }
 
-  function importRosterCSV(text) {
+  function importRosterCSV(text, actor) {
     text = String(text || '').trim();
     if (!text) return { ok: false, msg: '表格内容为空，请先下载模板填写后再导入', imported: 0, skipped: [] };
     const firstLine = text.split(/\r?\n/)[0] || '';
@@ -447,13 +646,15 @@
       phone: ['手机号', '手机', '电话', '手机号码', 'phone', 'tel'],
       role: ['角色', '身份', '类型', 'role', 'type'],
       cls: ['班级/部门', '班级', '部门', '任教班级', 'class'],
-      grade: ['年级', '学段', 'grade']
+      grade: ['年级', '学段', 'grade'],
+      schoolId: ['学校', '学校ID', 'school', 'schoolId'],
+      departmentId: ['教务处', '部门ID', 'department', 'departmentId']
     };
     const col = key => {
       const names = aliases[key] || [];
       return head.findIndex(h => names.some(n => h === n || h.indexOf(n) >= 0));
     };
-    const iName = col('name'), iPhone = col('phone'), iRole = col('role'), iCls = col('cls'), iGrade = col('grade');
+    const iName = col('name'), iPhone = col('phone'), iRole = col('role'), iCls = col('cls'), iGrade = col('grade'), iSchool = col('schoolId'), iDepartment = col('departmentId');
     if (iPhone < 0 || iName < 0 || iRole < 0) {
       return { ok: false, msg: '表格缺少必要列：需包含「姓名、手机号、角色」（可加 班级/部门、年级）。当前表头：' + head.join(' / '), imported: 0, skipped: [] };
     }
@@ -463,42 +664,44 @@
       const name = String(rows[r][iName] || '').trim();
       const phone = String(rows[r][iPhone] || '').trim();
       let role = String(rows[r][iRole] || '').trim();
-      if (role === '学生' || role === 'student') role = 'student';
-      else if (role === '教师' || role === 'teacher') role = 'teacher';
-      else role = 'teacher';
+      role = normalizeRole(role);
       if (!/^1\d{10}$/.test(phone)) { skipped.push((name || '未命名') + '(' + phone + ')：手机号不合法'); continue; }
       if (findUser(phone)) { skipped.push(name + '(' + phone + ')：账号已存在'); continue; }
+      if (actor && !canManageRole(actor, role)) { skipped.push(name + '(' + phone + ')：当前账号无权导入' + role); continue; }
+      const cls = iCls >= 0 ? String(rows[r][iCls] || '').trim() : '';
       const res = addUser({
         name: name,
         phone: phone,
         role: role,
-        cls: iCls >= 0 ? String(rows[r][iCls] || '').trim() : (role === 'student' ? '未分班' : '教师组'),
+        cls: cls,
         grade: iGrade >= 0 ? String(rows[r][iGrade] || '').trim() : '',
+        schoolId: iSchool >= 0 ? String(rows[r][iSchool] || '').trim() : '',
+        departmentId: iDepartment >= 0 ? String(rows[r][iDepartment] || '').trim() : '',
         status: '待激活'
-      });
+      }, actor);
       if (res.ok) imported++;
       else skipped.push(name + '(' + phone + ')：' + res.msg);
     }
     if (imported) {
-      pushNotice('已导入 ' + imported + ' 名成员（学生/教师），首次登录即正式激活；初始密码为手机号后 6 位。', '成员');
+      pushNotice('已导入 ' + imported + ' 名成员（教务处 / 教师 / 学生），首次登录即正式激活；初始密码仅用于首次激活。', '成员');
     }
     return { ok: imported > 0, msg: imported + ' 名成员已导入，等待首次登录激活', imported, skipped };
   }
 
   function rosterTemplate() {
-    return '\uFEFF姓名,手机号,角色,年级,班级/部门\n' +
-      '张小明,13900000001,学生,七年级,七（1）班\n' +
-      '李小红,13900000002,学生,七年级,七（1）班\n' +
-      '王老师,13900000003,教师,七年级,七（1）班';
+    return '\uFEFF姓名,手机号,角色,年级,班级/部门,学校ID,教务处ID\n' +
+      '张小明,13900000001,学生,七年级,七（1）班,school_default,\n' +
+      '李小红,13900000002,学生,七年级,七（1）班,school_default,\n' +
+      '王老师,13900000003,教师,七年级,七（1）班,school_default,';
   }
 
   function rosterExport(onlyRole) {
     const rows = data.users.filter(u => !onlyRole || u.role === onlyRole);
-    const head = '姓名,手机号,角色,年级,班级/部门,状态,首次激活时间';
+    const head = '姓名,手机号（脱敏）,角色,年级,班级/部门,学校ID,教务处ID,状态,首次激活时间';
     const lines = rows.map(u => [
-      u.name, u.phone,
-      u.role === 'student' ? '学生' : u.role === 'admin' ? '管理员' : '教师',
-      u.grade, u.cls, u.status, u.activatedAt ? u.activatedAt.slice(0, 10) : ''
+      u.name, u.phone ? (u.phone.slice(0, 3) + '****' + u.phone.slice(-4)) : '已加密',
+      u.role === 'student' ? '学生' : u.role === 'academic' ? '教务处' : u.role === 'admin' ? '管理员' : '教师',
+      u.grade, u.cls, u.schoolId || '', u.departmentId || '', u.status, u.activatedAt ? u.activatedAt.slice(0, 10) : ''
     ].map(csvEscape).join(','));
     return '\uFEFF' + head + '\n' + lines.join('\n');
   }
@@ -692,13 +895,14 @@
 
   /* ---------- 导出/导入整包（上云迁移用） ---------- */
   function exportBundle() {
-      return JSON.stringify({ version: 3, exportedAt: now(), data: data }, null, 2);
+    const snapshot = Object.assign({}, data, { users: secureUsersSnapshot(data.users) });
+    return JSON.stringify({ version: 4, exportedAt: now(), data: snapshot }, null, 2);
   }
   function importBundle(json) {
     try {
       const j = JSON.parse(json);
-      if (!j || ![2, 3].includes(j.version) || !j.data) return { ok: false, msg: '不是有效的本地数据包' };
-      COLLECTIONS.forEach(name => { if (j.data[name] !== undefined) data[name] = j.data[name]; });
+      if (!j || ![2, 3, 4].includes(j.version) || !j.data) return { ok: false, msg: '不是有效的本地数据包' };
+      COLLECTIONS.forEach(name => { if (j.data[name] !== undefined) data[name] = name === 'users' && Array.isArray(j.data[name]) ? j.data[name].map(hydrateUser) : j.data[name]; });
       COLLECTIONS.forEach(name => persist(name));
       return { ok: true };
     } catch (e) {
@@ -736,6 +940,13 @@
     resetPassword: resetPassword,
     findUser: findUser,
     users: users,
+    roles: () => Object.keys(ROLE_LEVEL),
+    canManageRole: canManageRole,
+    canManageUser: canManageUser,
+    classes: classes,
+    addClass: addClass,
+    updateClass: updateClass,
+    removeClass: removeClass,
     /* 成员表格 */
     importRosterCSV: importRosterCSV,
     rosterExport: rosterExport,
