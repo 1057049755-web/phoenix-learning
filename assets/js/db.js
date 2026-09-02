@@ -149,6 +149,7 @@
   async function logout() { try { if (token()) await request('POST', '/api/auth/logout'); } catch (e) {} sessionToken = ''; sessionStorage.removeItem(NS + '_session'); }
 
   function currentUser() { return data.users[0] || null; }
+  function setLocalUser(user) { data.users = user ? [Object.assign({}, user)] : []; }
   function findUser(id) { return data.users.find(user => String(user.id) === String(id) || String(user.phone) === String(id)); }
   function users() { return data.users.slice(); }
   function collection(name) { return data[name] || []; }
@@ -230,7 +231,7 @@
 
   window.FH_DB = {
     NS, init, reconnect, flushSync, cloudInfo, currentUser, token: () => token(), collection, collections: () => COLLECTIONS.slice(), saveCollection: persist, upsertRecord, removeRecord, subscribe: fn => { listeners.push(fn); return () => { listeners = listeners.filter(x => x !== fn); }; },
-    login, activate, changePassword, logout, users, findUser, addUser, updateUser, removeUser, resetPassword,
+    login, activate, changePassword, logout, setLocalUser, users, findUser, addUser, updateUser, removeUser, resetPassword,
     importRosterCSV, rosterTemplate, rosterExport, parseCSV,
     resources, addResource, updateResource, removeResource, beautifyResource,
     notices, pushNotice, addNotice, updateNotice, removeNotice, markNoticeRead,

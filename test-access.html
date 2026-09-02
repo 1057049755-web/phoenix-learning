@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <meta name="description" content="凤凰花·智学测试模式入口">
+  <title>凤凰花·智学｜测试模式</title>
+  <link rel="icon" type="image/png" href="assets/brand/favicon-64.png">
+  <link rel="stylesheet" href="assets/css/portal.css">
+</head>
+<body class="portal-subpage test-page">
+  <a class="portal-skip" href="#test-roles">跳到测试身份</a>
+  <header class="portal-header">
+    <div class="portal-wrap portal-header__inner">
+      <a class="portal-brand" href="index.html" aria-label="返回凤凰花·智学首页">
+        <span class="portal-brand__mark"><img src="assets/brand/logo-blue-transparent.png" alt=""></span>
+        <span class="portal-brand__name"><strong>凤凰花·智学</strong><small>LEARNING, ONE STEP AT A TIME</small></span>
+      </a>
+      <nav class="portal-header__nav" aria-label="页面导航">
+        <span class="test-badge">测试模式</span>
+        <a href="index.html">返回首页</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <div class="portal-wrap">
+      <section class="test-intro" aria-labelledby="test-title">
+        <span class="test-badge">测试模式</span>
+        <p class="portal-eyebrow" style="margin-top:22px">PREVIEW ACCESS / FOUR ROLES</p>
+        <h1 id="test-title">快速查看四端页面</h1>
+        <p>选择一个身份后，直接进入现有工作台首页。测试状态与本地账号分开保存。</p>
+      </section>
+      <section class="test-card" id="test-roles" aria-labelledby="test-role-title">
+        <h2 id="test-role-title">选择测试身份</h2>
+        <div class="test-role-grid" id="test-role-grid"></div>
+        <label class="test-option"><input type="checkbox" id="test-demo-data"><span><strong>创建完整测试数据</strong><small>只生成临时演示状态，不会覆盖本地账号或业务数据。</small></span></label>
+      </section>
+      <section class="test-disabled" id="test-disabled" hidden>
+        <h2>测试入口已关闭</h2>
+        <p>当前环境未开启测试开关。请在开发、预览环境或构建配置中明确启用后再访问。</p>
+      </section>
+    </div>
+  </main>
+  <footer class="portal-footer">
+    <div class="portal-wrap portal-footer__inner">
+      <span>测试状态只在当前浏览器有效</span>
+      <a href="identity.html">进入正式入口</a>
+    </div>
+  </footer>
+  <script src="assets/js/entry-common.js"></script>
+  <script src="assets/js/test-mode.js"></script>
+  <script src="assets/js/portal.js"></script>
+</body>
+</html>

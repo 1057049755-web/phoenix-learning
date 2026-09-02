@@ -61,6 +61,9 @@
     loginRole: 'teacher',
     user: null,
     loggedIn: false,
+    localAuth: false,
+    testMode: false,
+    testData: null,
     offline: false,
     cloud: false,
     cloudErr: '',
@@ -387,112 +390,10 @@
 
   /* ---------- 登录页 ---------- */
   function renderLogin() {
-    const cloudInfo = DB.cloudInfo();
-    $('#login-view').innerHTML =
-      '<div class="login-card login-card-modern">' +
-      '<section class="login-splash" aria-label="凤凰花智学欢迎页"><div class="splash-orbit orbit-a"></div><div class="splash-orbit orbit-b"></div><div class="splash-particles"></div><div class="splash-copy"><span class="splash-kicker">AI × 教育 · 智慧学习工作台</span><h1>让每一次学习，<br><em>都被看见。</em></h1><p>从知识理解到精准反馈，陪伴老师与学生把复杂的事做简单。</p><button type="button" class="btn btn-primary btn-lg" id="enter-login">开始使用 <span aria-hidden="true">→</span></button><button type="button" class="splash-skip" id="reduce-motion">减少动态效果</button><button type="button" class="splash-skip" id="gaze-toggle">开启视线互动（可选）</button><span class="splash-camera-status" id="gaze-status" role="status">默认关闭摄像头；视线互动需主动开启</span></div></section>' +
-      '<section class="login-panel" id="login-panel" hidden>' +
-      '<div class="login-brand"><span class="brand-mark">' +
-      '<img src="assets/brand/logo-blue-transparent.png" width="42" height="42" alt="凤凰花·智学标识"></span>' +
-      '<span class="brand-text">凤凰花·智学</span></div>' +
-      '<p class="login-sub">正式版 · 手机号 + 密码登录</p>' +
-      '<h2 class="login-title">账号登录</h2>' +
-      '<form id="login-form" novalidate>' +
-      '<div class="field"><label>手机号<span class="req">*</span></label>' +
-      '<input class="input" id="login-phone" type="tel" maxlength="11" placeholder="请输入 11 位手机号" autocomplete="username">' +
-      '<div class="field-error" id="phone-error" style="display:none">请输入 11 位手机号</div></div>' +
-      '<div class="field"><label>密码<span class="req">*</span></label>' +
-      '<input class="input" id="login-password" type="password" placeholder="请输入密码" autocomplete="current-password">' +
-      '<div class="field-error" id="password-error" style="display:none">请输入密码</div>' +
-      '<div class="form-hint">初始密码由管理员发放；首次登录后请设置至少 8 位新密码。</div></div>' +
-      '<button type="submit" class="btn btn-primary btn-lg" style="width:100%">登录</button>' +
-      '</form>' +
-      '<div class="login-role-picker" aria-label="登录角色"><span>登录身份</span><button type="button" data-login-role="admin">管理员</button><button type="button" data-login-role="academic">教务处</button><button type="button" data-login-role="teacher">老师</button><button type="button" data-login-role="student">学生</button></div>' +
-      '<div class="third-party-login"><div class="third-party-title">其他登录方式 <small>均需管理员配置</small></div><div class="third-party-grid">' + ['QQ','微信','GitHub','Google','Apple'].map(x => '<button type="button" class="third-party-btn" data-oauth="' + x + '">' + x + '<small>尚未配置</small></button>').join('') + '</div></div>' +
-      '<div class="login-foot">' + (cloudInfo.cloud ? '学校数据服务已连接，账号与业务数据受权限保护' : esc(cloudInfo.cloudErr || '学校数据服务未就绪，当前不会保存业务数据')) + '</div>' +
-      '<div class="login-note"><span>服务状态由服务器实时返回</span><span>隐私字段服务端加密</span></div>' +
-      '</section></div>';
-
-    const panel = $('#login-panel');
-    const hintedRole = parseHash().query.role;
-    state.loginRole = ['admin', 'academic', 'teacher', 'student'].includes(hintedRole) ? hintedRole : 'teacher';
-    const defaultRole = $('[data-login-role="' + state.loginRole + '"]');
-    if (defaultRole) defaultRole.classList.add('active');
-    const enter = () => { panel.hidden = false; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); const first = $('#login-phone'); if (first) first.focus(); };
-    $('#enter-login').onclick = enter;
-    const stage = document.querySelector('.login-splash');
-    if (stage) {
-      const move = (x, y) => { const r = stage.getBoundingClientRect(); stage.style.setProperty('--mx', ((x - r.left) / r.width * 100) + '%'); stage.style.setProperty('--my', ((y - r.top) / r.height * 100) + '%'); stage.style.setProperty('--px', ((x - r.left) / r.width - .5) * 18 + 'px'); stage.style.setProperty('--py', ((y - r.top) / r.height - .5) * 18 + 'px'); };
-      stage.addEventListener('pointermove', e => move(e.clientX, e.clientY), { passive: true });
-      stage.addEventListener('pointerleave', () => { stage.style.setProperty('--mx', '50%'); stage.style.setProperty('--my', '45%'); stage.style.setProperty('--px', '0px'); stage.style.setProperty('--py', '0px'); });
-    }
-    $('#reduce-motion').onclick = () => { document.documentElement.classList.toggle('reduce-motion'); showToast(document.documentElement.classList.contains('reduce-motion') ? '已减少动态效果' : '已恢复动态效果', 'info'); };
-    let gazeStream = null;
-    $('#gaze-toggle').onclick = async () => {
-      const status = $('#gaze-status'); const toggle = $('#gaze-toggle');
-      if (gazeStream) { gazeStream.getTracks().forEach(t => t.stop()); gazeStream = null; toggle.textContent = '开启视线互动（可选）'; status.textContent = '视线互动已关闭，摄像头已停止；鼠标/触控互动仍可用'; return; }
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status.textContent = '当前浏览器不支持摄像头；已回退到鼠标/触控互动'; return; }
-      if (location.protocol === 'file:') { status.textContent = '本地文件模式无法安全申请摄像头；请先启动本地服务并使用 localhost/HTTPS'; return; }
-      status.textContent = '正在请求摄像头权限…';
-      try { gazeStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); toggle.textContent = '关闭摄像头增强'; status.textContent = '摄像头增强已开启（本版本仅验证权限，不进行人脸/视线识别；不上传、不保存）；点击按钮即可停止'; }
-      catch (e) { status.textContent = e && e.name === 'NotAllowedError' ? '摄像头权限被拒绝；已回退到鼠标/触控互动' : '摄像头不可用；已回退到鼠标/触控互动'; }
-    };
-    $$('.third-party-btn').forEach(b => b.onclick = () => showToast(b.dataset.oauth + ' 登录尚未配置，请联系管理员配置 OAuth', 'info'));
-    $$('[data-login-role]').forEach(b => b.onclick = () => { $$('[data-login-role]').forEach(x => x.classList.remove('active')); b.classList.add('active'); state.loginRole = b.dataset.loginRole; showToast('已选择' + b.textContent + '身份，请使用该身份账号登录', 'info'); $('#login-phone').focus(); });
-
-    $('#login-form').onsubmit = async (e) => {
-      e.preventDefault();
-      const phone = $('#login-phone').value.trim();
-      const password = $('#login-password').value;
-      const phoneErr = $('#phone-error');
-      const pwErr = $('#password-error');
-      if (!/^1\d{10}$/.test(phone)) { phoneErr.style.display = 'block'; $('#login-phone').classList.add('error'); return; }
-      phoneErr.style.display = 'none';
-      $('#login-phone').classList.remove('error');
-      if (!password) { pwErr.style.display = 'block'; $('#login-password').classList.add('error'); return; }
-      pwErr.style.display = 'none';
-      $('#login-password').classList.remove('error');
-      const res = await DB.login(phone, password);
-      if (!res.ok) { showToast(res.msg, 'error'); return; }
-      if (res.user && res.user.role !== state.loginRole) { showToast('登录身份与账号类型不一致，请切换为' + M.roles[res.user.role].label + '后再试', 'error'); return; }
-      if (res.needActivate) { showActivationDialog(res.user, password); return; }
-      finishLogin(res.user);
-    };
-  }
-
-  function finishLogin(user) {
-    state.user = user;
-    state.role = user.role;
-    state.loggedIn = true;
-    sessionStorage.setItem('fh_role', user.role);
-    sessionStorage.setItem('fh_uid', user.id);
-    sessionStorage.setItem('fh_logged', '1');
-    showToast((user.name || M.roles[user.role].label) + '，欢迎回来！', 'success');
-    nav('#/home');
-  }
-
-  function showActivationDialog(user, initPwd) {
-    const root = $('#dialog-root');
-    root.innerHTML = '<div class="dialog-mask"><div class="dialog" style="max-width:420px" role="dialog" aria-modal="true">' +
-      '<h3 class="dialog-title">首次登录 · 正式激活</h3>' +
-      '<div class="dialog-body">' +
-      '<p style="font-size:13.5px;color:var(--text-2);margin:0 0 10px">账号 <b>' + esc(user.name || user.phone) + '</b>（' + esc(M.roles[user.role].label) + '）已由管理员导入。设置你的专属密码后即正式激活，下次使用新密码登录。</p>' +
-      '<div class="field"><label>新密码（至少 8 位）</label><input class="input" id="act-pwd" type="password" placeholder="设置新密码"></div>' +
-      '<div class="field"><label>确认新密码</label><input class="input" id="act-pwd2" type="password" placeholder="再次输入新密码"></div>' +
-      '</div>' +
-      '<div class="dialog-actions"><button class="btn btn-ghost" data-dialog="cancel">退出</button>' +
-      '<button class="btn btn-primary" data-dialog="ok">激活并登录</button></div></div></div>';
-    root.querySelector('[data-dialog="cancel"]').onclick = () => { root.innerHTML = ''; showToast('尚未激活，可稍后用初始密码重新登录', 'info'); };
-    root.querySelector('.dialog-mask').addEventListener('click', e => { if (e.target === e.currentTarget) root.innerHTML = ''; });
-    root.querySelector('[data-dialog="ok"]').onclick = async () => {
-      const p1 = $('#act-pwd').value, p2 = $('#act-pwd2').value;
-      if (p1.length < 8) { showToast('新密码至少 8 位', 'error'); return; }
-      if (p1 !== p2) { showToast('两次输入的密码不一致', 'error'); return; }
-      const r = await DB.activate(user.phone, p1);
-      root.innerHTML = '';
-      if (r.ok) { showToast('激活成功，欢迎使用正式版', 'success'); finishLogin(r.user); }
-      else showToast(r.msg, 'error');
-    };
+    const query = parseHash().query;
+    const role = ['admin', 'academic', 'teacher', 'student'].includes(query.role) ? query.role : '';
+    const target = 'login.html' + (role ? '?role=' + encodeURIComponent(role) : '');
+    if (location.href.indexOf(target) < 0) window.location.replace(target);
   }
 
   /* ---------- 首页 ---------- */
@@ -1357,7 +1258,12 @@
     if (act === 'logout') {
       state.loggedIn = false;
       state.user = null;
+      if (state.testMode && window.FH_TEST_MODE) window.FH_TEST_MODE.clear();
+      if (state.localAuth && window.FH_LOCAL_AUTH) window.FH_LOCAL_AUTH.logout();
       if (DB.logout) DB.logout();
+      state.localAuth = false;
+      state.testMode = false;
+      state.testData = null;
       sessionStorage.removeItem('fh_logged');
       sessionStorage.removeItem('fh_role');
       sessionStorage.removeItem('fh_uid');
@@ -1393,7 +1299,9 @@
       const oldP = $('#cp-old').value, p1 = $('#cp-new').value, p2 = $('#cp-new2').value;
       if (p1.length < 8) { showToast('新密码至少 8 位', 'error'); return; }
       if (p1 !== p2) { showToast('两次输入的新密码不一致', 'error'); return; }
-      const r = await DB.changePassword(u.phone, oldP, p1);
+      const r = state.localAuth && window.FH_LOCAL_AUTH
+        ? await window.FH_LOCAL_AUTH.changePassword(u.id, oldP, p1)
+        : await DB.changePassword(u.phone, oldP, p1);
       root.innerHTML = '';
       if (r.ok) { showToast('密码已修改', 'success'); DB.auditLog('修改密码', u.name + ' 修改了自己的登录密码', u.name); }
       else showToast(r.msg, 'error');
@@ -4274,8 +4182,33 @@
   P['/help'] = renderHelp;
   P['/placeholder'] = function () { renderPage(placeholder('页面开发中', '该页面将在后续迭代实现')); };
 
-  /* 会话恢复（正式版：按导入账号恢复，不再有演示角色直通） */
-  function restoreSession() {
+  /* 会话恢复：本地账号、测试会话与旧网络会话使用不同命名空间。 */
+  async function restoreSession() {
+    const testSession = window.FH_TEST_MODE && window.FH_TEST_MODE.session ? window.FH_TEST_MODE.session() : null;
+    if (testSession) {
+      if (!window.FH_TEST_MODE.isEnabled()) { window.FH_TEST_MODE.clear(); return; }
+      const role = ['admin', 'academic', 'teacher', 'student'].includes(testSession.role) ? testSession.role : 'student';
+      const label = M.roles[role] ? M.roles[role].label : '使用者';
+      state.loggedIn = true;
+      state.testMode = true;
+      state.localAuth = false;
+      state.testData = window.FH_TEST_MODE.demoData ? window.FH_TEST_MODE.demoData() : null;
+      state.user = { id: testSession.id, account: 'test-' + role, phone: 'test-' + role, name: label + '测试账号', displayName: label + '测试账号', role: role, local: true, test: true };
+      state.role = role;
+      if (DB.setLocalUser) DB.setLocalUser(state.user);
+      return;
+    }
+    if (window.FH_LOCAL_AUTH && window.FH_LOCAL_AUTH.getSessionUser) {
+      const localUser = await window.FH_LOCAL_AUTH.getSessionUser();
+      if (localUser) {
+        state.loggedIn = true;
+        state.localAuth = true;
+        state.user = localUser;
+        state.role = localUser.role;
+        if (DB.setLocalUser) DB.setLocalUser(localUser);
+        return;
+      }
+    }
     if (!sessionStorage.getItem('fh_logged')) return;
     const uid = sessionStorage.getItem('fh_uid');
     const u = DB.users().find(x => x.id === uid);
@@ -4290,17 +4223,16 @@
     state.role = u.role;
   }
 
-  /* 页面注册完成后：先初始化 v2 数据层（本地 + 云端配置文件夹），再执行首次路由 */
+  /* 页面注册完成后进入本地原型模式；业务页面保持原有模块不变。 */
   (async function bootstrap() {
     try {
-      const info = await DB.init();
-      state.cloud = info.cloud;
-      state.cloudErr = info.cloudErr;
+      state.cloud = false;
+      state.cloudErr = '当前为前端本地认证模式';
       if (personalizationService()) personalizationService().bootstrap(M.KNOWLEDGE || []);
     } catch (e) {
       state.cloudErr = '数据层初始化失败：' + (e && e.message);
     }
-    restoreSession();
+    await restoreSession();
     window.__router();
   })();
 })();

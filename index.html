@@ -1,132 +1,129 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#111a43">
-  <meta name="description" content="凤凰花·智学网络入口：选择学生端、教师端或管理端">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <meta name="description" content="凤凰花·智学，面向一至九年级学生、教师与学校的智能教学平台">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="凤凰花·智学">
-  <title>凤凰花·智学｜启动入口</title>
+  <title>凤凰花·智学｜从今天开始</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="assets/brand/favicon-64.png">
-  <link rel="stylesheet" href="assets/css/entry-index.css">
+  <link rel="stylesheet" href="assets/css/portal.css">
 </head>
-<body>
-  <a class="fh-portal-skip" href="#fh-portal-entries">跳到入口选择</a>
-
-  <header class="fh-portal-bar">
-    <div class="fh-portal-wrap fh-portal-bar__inner">
-      <a class="fh-portal-brand" href="index.html" aria-label="凤凰花智学启动入口">
-        <span class="fh-portal-brand__mark"><img src="assets/brand/logo-blue-transparent.png" alt=""></span>
-        <span><strong>凤凰花·智学</strong><small>NETWORK LEARNING SPACE</small></span>
+<body class="entry-page">
+  <a class="portal-skip" href="#portal-roles">跳到身份入口</a>
+  <header class="portal-header">
+    <div class="portal-wrap portal-header__inner">
+      <a class="portal-brand" href="index.html" aria-label="凤凰花·智学首页">
+        <span class="portal-brand__mark"><img src="assets/brand/logo-blue-transparent.png" alt=""></span>
+        <span class="portal-brand__name"><strong>凤凰花·智学</strong><small>LEARNING, ONE STEP AT A TIME</small></span>
       </a>
-      <div class="fh-portal-bar__right">
-        <span class="fh-portal-locality"><i></i>网络服务 · 入口索引</span>
-        <a class="fh-portal-team-link" href="team-index.html">认识团队 <span aria-hidden="true">↗</span></a>
-        <button class="fh-portal-config-link" type="button" data-open-config>配置三端</button>
-      </div>
+      <nav class="portal-header__nav" aria-label="页面导航">
+        <a href="#portal-help">帮助</a>
+        <a href="#portal-service">服务说明</a>
+        <a class="portal-header__cta" href="identity.html">进入平台</a>
+      </nav>
     </div>
   </header>
 
-  <main class="fh-portal-main">
-    <section class="fh-portal-hero" aria-labelledby="fh-portal-title">
-      <div class="fh-portal-wrap fh-portal-hero__grid">
-        <div class="fh-portal-hero__copy">
-          <p class="fh-portal-kicker"><span></span>START HERE / 2026</p>
-          <h1 id="fh-portal-title">从你的角色，<br><em>开始今天的学习。</em></h1>
-          <p class="fh-portal-hero__lead">凤凰花·智学把同一套学习、教学与管理能力，整理成三个清晰入口。先选身份，再去做今天最重要的事。</p>
-          <div class="fh-portal-hero__actions">
-            <a class="fh-portal-button fh-portal-button--primary" href="workbench.html#/login?role=teacher" data-entry-key="teacher">进入教师端 <span aria-hidden="true">↗</span></a>
-            <a class="fh-portal-button fh-portal-button--line" href="#fh-portal-entries">选择其他端口 <span aria-hidden="true">↓</span></a>
+  <main>
+    <section class="portal-hero" aria-labelledby="portal-title">
+      <div class="portal-wrap portal-hero__grid">
+        <div>
+          <p class="portal-eyebrow portal-eyebrow--light">PHOENIX LEARNING SPACE</p>
+          <h1 id="portal-title">让每一次学习，<br><em>都有清晰的下一步</em></h1>
+          <p class="portal-hero__lead">面向一至九年级学生、教师与学校的智能教学平台</p>
+          <div class="portal-actions">
+            <a class="portal-button portal-button--primary" href="identity.html">进入平台 <span aria-hidden="true">↗</span></a>
+            <a class="portal-button portal-button--dark" href="identity.html?mode=create">首次使用 <span aria-hidden="true">→</span></a>
           </div>
-          <div class="fh-portal-hero__note"><span class="fh-portal-note-icon">✦</span><span>统一进入网络工作台，账号和数据由学校服务管理。</span></div>
+          <p class="portal-hero__note">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/></svg>
+            先选身份，再进入与你有关的工作空间。
+          </p>
         </div>
-
-        <div class="fh-portal-hero__visual" aria-label="凤凰花智学学习场景">
-          <div class="fh-portal-art">
-            <img src="assets/brand/generated/learning-worlds.png" alt="三个连接在一起的学习世界：观测、阅读与创造" loading="eager">
-            <div class="fh-portal-art__shade"></div>
-            <div class="fh-portal-art__caption"><span>ONE PURPOSE</span><strong>让每一次学习<br>都有下一步。</strong></div>
+        <div class="portal-visual" aria-label="知识从理解走向行动的抽象图示">
+          <div class="portal-visual__frame">
+            <div class="portal-visual__wash"></div>
+            <svg class="portal-visual__svg" viewBox="0 0 420 360" role="img" aria-label="书页、路径和凤凰花的线稿图示" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M54 285c71-10 108-50 136-103 19-37 53-60 107-67 24-3 45-14 64-35" stroke="#b7d8cf" stroke-width="2"/>
+              <path d="M53 285c37-5 67 4 94 28M190 182c27 15 42 35 52 63" stroke="#b7d8cf" stroke-width="2" opacity=".72"/>
+              <path d="M111 234V121l77-31 77 31v113c-49-18-105-18-154 0Z" stroke="#f2c67e" stroke-width="2.2"/>
+              <path d="M188 90v126M111 121l77 31 77-31M129 157h42M129 178h31M207 157h39M207 178h28" stroke="#f2c67e" stroke-width="2"/>
+              <path d="M319 97c-5-28 7-49 28-62M319 97c19-8 36-5 51 10M319 97c-20-3-33 4-43 18M319 97c6 18 2 32-12 45" stroke="#efb478" stroke-width="2.2"/>
+              <path d="M317 102c-21 29-35 50-45 79M321 103c18 27 23 50 21 72" stroke="#efb478" stroke-width="1.7"/>
+              <circle cx="319" cy="97" r="7" fill="#f2c67e" stroke="none"/>
+              <circle cx="54" cy="285" r="7" fill="#b7d8cf" stroke="none"/>
+              <circle cx="297" cy="115" r="5" fill="#b7d8cf" stroke="none"/>
+              <path d="M63 300c31 7 61 5 86-6" stroke="#f2c67e" stroke-width="1.5" opacity=".7"/>
+            </svg>
+            <div class="portal-visual__label"><small>LEARN / TEACH / ORGANIZE</small><strong>从理解，走到<br>下一步行动。</strong></div>
           </div>
-          <div class="fh-portal-orbit fh-portal-orbit--one"><span>01</span> 看见问题</div>
-          <div class="fh-portal-orbit fh-portal-orbit--two"><span>02</span> 留下证据</div>
+          <span class="portal-visual__tag portal-visual__tag--one">看见学习进度</span>
+          <span class="portal-visual__tag portal-visual__tag--two">留下下一步</span>
         </div>
       </div>
     </section>
 
-    <section class="fh-portal-entries" id="fh-portal-entries" aria-labelledby="fh-portal-entries-title">
-      <div class="fh-portal-wrap">
-        <div class="fh-portal-section-head">
-          <div><p class="fh-portal-eyebrow">01 / 选择入口</p><h2 id="fh-portal-entries-title">你今天要<br>从哪里开始？</h2></div>
-          <p>三个端口各自只显示与你有关的任务。没有配置独立地址时，会安全地进入现有统一工作台，并自动预选对应身份。</p>
+    <section class="portal-roles" id="portal-roles" aria-labelledby="portal-roles-title">
+      <div class="portal-wrap">
+        <div class="portal-section-head">
+          <div><p class="portal-eyebrow">01 / 选择身份</p><h2 id="portal-roles-title">从你今天的<br>角色开始。</h2></div>
+          <p id="portal-service">四个入口各自对应一类工作。教务处处理教学安排，系统管理员维护平台配置与安全。</p>
         </div>
-
-        <div class="fh-portal-entry-grid">
-          <article class="fh-portal-entry-card fh-portal-entry-card--student">
-            <div class="fh-portal-entry-card__head"><span class="fh-portal-entry-card__num">01</span><span class="fh-portal-entry-card__type">STUDENT</span></div>
-            <div class="fh-portal-entry-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.4-3.2 3.1-5.3 7-5.3s6.6 2.1 7 5.3"/><path d="M4 4h3M17 4h3"/></svg></div>
-            <h3>学生端</h3><p>知识点、错题本和今日计划，陪你把“不会”拆成下一步。</p>
-            <a class="fh-portal-entry-card__button" href="workbench.html#/login?role=student" data-entry-key="student">进入学生端 <span aria-hidden="true">↗</span></a>
-            <span class="fh-portal-entry-card__status" data-entry-status="student">统一网络工作台 · 学生身份</span>
+        <div class="portal-role-grid">
+          <article class="portal-role-card portal-role-card--student">
+            <div class="portal-role-card__top"><span>01</span><span>STUDENT</span></div>
+            <div class="portal-role-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.4-3.2 3.1-5.3 7-5.3s6.6 2.1 7 5.3"/></svg></div>
+            <h3>学生</h3><p>完成作业，查看学习进步</p>
+            <a class="portal-role-card__button" href="identity.html?role=student">进入学生端 <span aria-hidden="true">↗</span></a>
           </article>
-
-          <article class="fh-portal-entry-card fh-portal-entry-card--teacher fh-portal-entry-card--featured">
-            <span class="fh-portal-featured">推荐起点</span>
-            <div class="fh-portal-entry-card__head"><span class="fh-portal-entry-card__num">02</span><span class="fh-portal-entry-card__type">TEACHER</span></div>
-            <div class="fh-portal-entry-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19.5V5.8c0-.9.7-1.6 1.6-1.6H19v15.3H5.6c-.9 0-1.6-.7-1.6-1.6Z"/><path d="M7.5 7.5h8M7.5 11h8M7.5 14.5h4"/><path d="M19 4.2v15.3"/></svg></div>
-            <h3>教师端</h3><p>从备课、组卷或批改开始，把经验变成可追踪的教学行动。</p>
-            <a class="fh-portal-entry-card__button" href="workbench.html#/login?role=teacher" data-entry-key="teacher">进入教师端 <span aria-hidden="true">↗</span></a>
-            <span class="fh-portal-entry-card__status" data-entry-status="teacher">统一网络工作台 · 教师身份</span>
+          <article class="portal-role-card portal-role-card--teacher">
+            <div class="portal-role-card__top"><span>02</span><span>TEACHER</span></div>
+            <div class="portal-role-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V5.8c0-.9.7-1.6 1.6-1.6H19v15.3H5.6c-.9 0-1.6-.7-1.6-1.6Z"/><path d="M7.5 7.5h8M7.5 11h8M7.5 14.5h4"/></svg></div>
+            <h3>教师</h3><p>开展教学与班级管理</p>
+            <a class="portal-role-card__button" href="identity.html?role=teacher">进入教师端 <span aria-hidden="true">↗</span></a>
           </article>
-
-          <article class="fh-portal-entry-card fh-portal-entry-card--admin">
-            <div class="fh-portal-entry-card__head"><span class="fh-portal-entry-card__num">03</span><span class="fh-portal-entry-card__type">ADMIN</span></div>
-            <div class="fh-portal-entry-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V6.5L12 3l8 3.5V20"/><path d="M8 20v-5h8v5M8 9h.01M12 9h.01M16 9h.01"/><path d="M2 20h20"/></svg></div>
-            <h3>管理端</h3><p>成员、班级、资源和服务，维持学校协同的清晰秩序。</p>
-            <a class="fh-portal-entry-card__button" href="workbench.html#/login?role=admin" data-entry-key="admin">进入管理端 <span aria-hidden="true">↗</span></a>
-            <span class="fh-portal-entry-card__status" data-entry-status="admin">统一网络工作台 · 管理端身份</span>
+          <article class="portal-role-card portal-role-card--academic">
+            <div class="portal-role-card__top"><span>03</span><span>ACADEMIC</span></div>
+            <div class="portal-role-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h3M8 17h6"/></svg></div>
+            <h3>教务处</h3><p>统筹课程、班级与考试</p>
+            <a class="portal-role-card__button" href="identity.html?role=academic">进入教务处 <span aria-hidden="true">↗</span></a>
+          </article>
+          <article class="portal-role-card portal-role-card--admin">
+            <div class="portal-role-card__top"><span>04</span><span>ADMIN</span></div>
+            <div class="portal-role-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 19 6v5c0 4.7-2.8 8-7 10-4.2-2-7-5.3-7-10V6l7-3Z"/><path d="m9.3 12 1.8 1.8 3.8-4"/></svg></div>
+            <h3>系统管理员</h3><p>维护平台配置与安全</p>
+            <a class="portal-role-card__button" href="identity.html?role=admin">进入系统管理 <span aria-hidden="true">↗</span></a>
           </article>
         </div>
       </div>
     </section>
 
-    <section class="fh-portal-guide" aria-labelledby="fh-portal-guide-title">
-      <div class="fh-portal-wrap fh-portal-guide__grid">
-        <div><p class="fh-portal-eyebrow">02 / 第一次使用</p><h2 id="fh-portal-guide-title">三件事，<br>就够开始。</h2></div>
-        <ol class="fh-portal-guide__steps">
-          <li><b>01</b><div><strong>选择身份</strong><span>先进入和你有关的端口。</span></div></li>
-          <li><b>02</b><div><strong>完成一个任务</strong><span>从今日计划、待批改或待处理开始。</span></div></li>
-          <li><b>03</b><div><strong>留下下一步</strong><span>保存、复核或记录，让进度不丢失。</span></div></li>
+    <section class="portal-guide" id="portal-help" aria-labelledby="portal-help-title">
+      <div class="portal-wrap portal-guide__grid">
+        <div><p class="portal-eyebrow portal-eyebrow--light">02 / 第一次使用</p><h2 id="portal-help-title">选好身份，<br>就能开始。</h2></div>
+        <ol class="portal-steps">
+          <li><b>01</b><div><strong>选择身份</strong><span>先进入和你有关的入口。</span></div></li>
+          <li><b>02</b><div><strong>创建或登录账号</strong><span>在当前浏览器完成本地测试。</span></div></li>
+          <li><b>03</b><div><strong>进入工作空间</strong><span>从今天要完成的事情开始。</span></div></li>
         </ol>
-        <a class="fh-portal-guide__link" href="team-index.html"><span>想先了解项目与团队？</span><strong>查看完整团队索引 ↗</strong></a>
+        <a class="portal-guide__link" href="identity.html"><span>准备进入平台？</span><strong>选择你的使用身份 ↗</strong></a>
       </div>
     </section>
   </main>
 
-  <footer class="fh-portal-footer">
-    <div class="fh-portal-wrap fh-portal-footer__inner">
-      <span>凤凰花·智学 / NETWORK FIRST</span>
-      <span>原有工作台入口：<a href="workbench.html#/login">workbench.html ↗</a></span>
-      <button type="button" data-open-config>配置三端地址</button>
+  <footer class="portal-footer">
+    <div class="portal-wrap portal-footer__inner">
+      <span>凤凰花·智学 · 让每一次学习，都有清晰的下一步</span>
+      <a href="identity.html">登录或创建账号</a>
+      <a class="fh-test-link" data-test-link href="test-access.html" hidden>测试入口</a>
     </div>
   </footer>
-
-  <dialog class="fh-portal-dialog" id="fh-portal-dialog" aria-labelledby="fh-portal-dialog-title">
-    <form class="fh-portal-dialog__card" method="dialog" data-portal-config-form>
-      <div class="fh-portal-dialog__head"><div><p class="fh-portal-eyebrow">入口配置</p><h2 id="fh-portal-dialog-title">把三个端口<br>放到这里。</h2></div><button class="fh-portal-dialog__close" type="button" data-close-config aria-label="关闭配置窗口">×</button></div>
-      <p class="fh-portal-dialog__hint">支持完整 URL 或内部路径。地址仅作为当前入口配置使用，业务数据仍由学校服务管理。</p>
-      <div class="fh-portal-dialog__fields">
-        <label><span>学生端位置</span><input type="text" data-portal-input="student" placeholder="例如：workbench.html#/login?role=student"></label>
-        <label><span>教师端位置</span><input type="text" data-portal-input="teacher" placeholder="例如：workbench.html#/login?role=teacher"></label>
-        <label><span>管理端位置</span><input type="text" data-portal-input="admin" placeholder="例如：workbench.html#/login?role=admin"></label>
-      </div>
-      <div class="fh-portal-dialog__actions"><button class="fh-portal-button fh-portal-button--line" type="button" data-clear-portal-config>恢复默认</button><button class="fh-portal-button fh-portal-button--primary" type="submit">保存配置</button></div>
-    </form>
-  </dialog>
-
-  <div class="fh-portal-toast" role="status" aria-live="polite" data-portal-toast></div>
-  <script src="assets/js/entry-index.js"></script>
+  <script src="assets/js/entry-common.js"></script>
+  <script src="assets/js/test-mode.js"></script>
+  <script src="assets/js/portal.js"></script>
 </body>
 </html>
