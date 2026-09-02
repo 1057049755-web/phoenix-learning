@@ -1,9 +1,0 @@
-{
-  "name": "凤凰花·智学",
-  "short_name": "凤凰花·智学",
-  "start_url": "./index.html",
-  "display": "standalone",
-  "background_color": "#f2f2f7",
-  "theme_color": "#007aff",
-  "icons": [{"src":"assets/brand/logo-blue-256.png","sizes":"256x256","type":"image/png","purpose":"any maskable"}]
-}
