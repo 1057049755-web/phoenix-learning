@@ -6,7 +6,7 @@
 
 模型名称、精确版本、能力、上下文、输出上限、价格字段和可用状态不再由页面名单决定。服务商目录保存在 `model_registry_providers`，模型快照保存在 `model_registry_models`，每次变更保存在 `model_registry_history`，同步运行保存在 `model_registry_sync_runs`。
 
-原始厂家、云平台和聚合平台分开记录。2026-09-02 目录已扩展为 20 个官方网络 API 入口：在原有入口之外，加入 Cerebras Inference、SambaNova Cloud、MiniMax 开放平台、腾讯云 TokenHub 和 Perplexity API。具体模型不写入前端代码，由官方模型列表接口同步后入库。
+原始厂家、云平台和聚合平台分开记录。2026-09-02 目录已扩展为 21 个官方网络 API 入口，并加入智谱AI（BigModel）。具体模型不写入前端代码，由官方模型列表接口同步后入库；智谱的默认入口为官方文档标注免费的 `glm-4-flash-250414`，价格依据官方定价页记录。
 
 OpenRouter 官方文档说明可以通过 `GET /api/v1/models` 取得模型及属性，并返回上下文长度和 pricing 字段：[模型 API 文档](https://openrouter.ai/docs/api/api-reference/models/get-models)、[模型目录](https://openrouter.ai/models/)。
 
@@ -19,6 +19,7 @@ OpenRouter 官方文档说明可以通过 `GET /api/v1/models` 取得模型及�
 | 原始厂家 | Anthropic | `https://api.anthropic.com/v1/models` | `FH_MODEL_REGISTRY_KEY_ANTHROPIC` |
 | 原始厂家 | Google AI Studio | `https://generativelanguage.googleapis.com/v1beta/models` | `FH_MODEL_REGISTRY_KEY_GOOGLE_AI_STUDIO` |
 | 原始厂家 | DeepSeek | `https://api.deepseek.com/models` | `FH_MODEL_REGISTRY_KEY_DEEPSEEK` |
+| 原始厂家 | 智谱AI（BigModel） | `https://open.bigmodel.cn/api/paas/v4/models` | `FH_MODEL_REGISTRY_KEY_ZHIPU` |
 | 云平台 | 阿里云百炼 Model Studio | `https://dashscope.aliyuncs.com/api/v1/models` | `FH_MODEL_REGISTRY_KEY_ALIBABA_MODEL_STUDIO` |
 | 云平台 | 百度智能云千帆 | `https://qianfan.baidubce.com/v2/models` | `FH_MODEL_REGISTRY_KEY_BAIDU_QIANFAN` |
 | 云平台 | 硅基流动 | `https://api.siliconflow.cn/v1/models` | `FH_MODEL_REGISTRY_KEY_SILICONFLOW` |
@@ -44,7 +45,7 @@ OpenRouter 官方文档说明可以通过 `GET /api/v1/models` 取得模型及�
 3. 服务端从数据库读取官方模型列表地址和服务端环境变量名；管理员也可从连接中心临时提交当前设备 Key 触发一次同步，服务端不把该 Key 写入目录、同步记录或工作流日志。
 4. 请求设置超时、响应大小上限、分页上限和最多 5000 条记录；对模型 ID、能力、价格、上下文和版本做结构化归一化。
 5. 同一服务商没有出现在新目录的历史模型会标记为 `unavailable`，不物理删除；新目录中的记录标记为 `available`。
-6. 价格字段直接保存官方接口返回值。官方模型列表未提供价格时保留其官方来源链接，页面明确显示“官方模型列表未返回单价”，不根据记忆或搜索结果补写价格。
+6. 价格字段直接保存官方接口返回值。官方模型列表未提供价格时保留其官方来源链接；对智谱默认的 `glm-4-flash-250414`，使用智谱官方定价页明确标注的免费价格覆盖值，并在页面附上定价链接。
 7. 通过模型指纹判断变更，发生变化时写入历史快照；同步结果返回模型数量、变更数量、来源哈希和同步时间。
 
 ## 接口

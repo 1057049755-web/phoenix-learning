@@ -8,9 +8,22 @@
 
   const STORE_KEY = 'fh_ai_config_runtime';
   let runtimeStore = { version: 3, activeProfileId: '', profiles: [], relayBase: '', style: 'warm' };
+  const DEFAULT_PROVIDER = 'zhipu';
+  const DEFAULT_MODEL = 'glm-4-flash-250414';
 
   /* 具体厂家、接口地址和模型均由服务端官方目录注入；这里只保留自定义接口兜底。 */
   const PROVIDERS = {
+    zhipu: {
+      name: '智谱AI（BigModel）', endpoint: 'https://open.bigmodel.cn/api/paas/v4', model: DEFAULT_MODEL,
+      auth: 'bearer', protocol: 'openai-chat',
+      keyHint: '前往智谱开放平台创建 API Key；默认 GLM-4-Flash-250414 为免费模型。',
+      defaultName: '智谱 GLM-4-Flash（默认）',
+      metadata: {
+        protocol: 'openai-chat', defaultModel: DEFAULT_MODEL,
+        defaultModelName: 'GLM-4-Flash-250414（免费）',
+        defaultPricing: { unit: 'CNY_per_token', currency: 'CNY', prompt: 0, completion: 0, source: 'official_pricing_page' }
+      }
+    },
     custom: {
       name: '自定义接口', endpoint: '', model: '', auth: 'optional', protocol: 'openai-chat',
       keyHint: '填写服务商官方 Base URL、模型 ID 和 API Key。'
@@ -46,7 +59,9 @@
         name: item.name || key,
         endpoint: item.apiBase || '',
         endpointPath: metadata.endpointPath || '',
-        model: '',
+        model: metadata.defaultModel || '',
+        defaultName: metadata.defaultName || '',
+        metadata: metadata,
         auth: metadata.authHeader === 'x-api-key' ? 'x-api-key' : 'bearer',
         authHeader: metadata.authHeader || 'Authorization',
         protocol: metadata.protocol || 'openai-chat',
@@ -71,11 +86,12 @@
     return base + (profile.endpointPath || PROTOCOLS[protocol].suffix);
   }
   function defaultProfile(providerId) {
-    const p = providerOf(providerId);
+    const selectedProvider = providerId || DEFAULT_PROVIDER;
+    const p = providerOf(selectedProvider);
     return normalizeProfile({
       id: makeId('profile'),
-      name: p.name.replace(/（.*$/, '').trim() || p.name,
-      provider: providerId || 'custom',
+      name: p.defaultName || (p.name || '新连接').replace(/（.*$/, '').trim() || p.name,
+      provider: selectedProvider,
       baseUrl: stripEndpoint(p.endpoint),
       model: p.model || '',
       protocol: p.protocol || inferProtocol(p.endpoint),
@@ -197,6 +213,16 @@
   }
   function emitConfigChange() {
     try { window.dispatchEvent(new CustomEvent('fh-ai-config-changed', { detail: getConfig() })); } catch (e) {}
+  }
+
+  function ensureDefaultProfile() {
+    const store = readStore();
+    if (store.profiles.length || store.activeProfileId) return store;
+    const profile = defaultProfile(DEFAULT_PROVIDER);
+    store.profiles = [profile];
+    store.activeProfileId = profile.id;
+    writeStore(store);
+    return store;
   }
 
   function isConfigured() {
@@ -1242,8 +1268,12 @@
     return raw;
   }
 
+  ensureDefaultProfile();
+
   window.AI = {
     PROVIDERS: PROVIDERS,
+    DEFAULT_PROVIDER: DEFAULT_PROVIDER,
+    DEFAULT_MODEL: DEFAULT_MODEL,
     PROTOCOLS: PROTOCOLS,
     ROUTES: ROUTES,
     PAID_MODELS: PAID_MODELS,

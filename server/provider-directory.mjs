@@ -35,6 +35,16 @@ export const MODEL_PROVIDER_DIRECTORY = [
     metadata: { sourcePolicy: 'official_api', role: 'original_vendor', protocol: 'openai-chat' }
   },
   {
+    id: 'provider-zhipu', slug: 'zhipu', name: '智谱AI（BigModel）', kind: 'official_api',
+    docsUrl: 'https://docs.bigmodel.cn/cn/guide/models/free/glm-4-flash-250414', pricingUrl: 'https://bigmodel.cn/pricing',
+    modelsEndpoint: 'https://open.bigmodel.cn/api/paas/v4/models', apiBase: 'https://open.bigmodel.cn/api/paas/v4', authEnv: 'FH_MODEL_REGISTRY_KEY_ZHIPU',
+    metadata: {
+      sourcePolicy: 'official_api', role: 'original_vendor', protocol: 'openai-chat',
+      defaultModel: 'glm-4-flash-250414', defaultName: '智谱 GLM-4-Flash（默认）', defaultModelName: 'GLM-4-Flash-250414（免费）',
+      defaultPricing: { unit: 'CNY_per_token', currency: 'CNY', prompt: 0, completion: 0, source: 'official_pricing_page' }
+    }
+  },
+  {
     id: 'provider-alibaba-model-studio', slug: 'alibaba-model-studio', name: '阿里云百炼 Model Studio', kind: 'cloud_api',
     docsUrl: 'https://help.aliyun.com/zh/model-studio/list-models', pricingUrl: 'https://help.aliyun.com/zh/model-studio/models', dataPolicyUrl: 'https://terms.alicdn.com/legal-agreement/terms/suit_bu1_aliyun/suit_bu1_aliyun202112271434_86114.html',
     modelsEndpoint: 'https://dashscope.aliyuncs.com/api/v1/models', pricingEndpoint: 'https://help.aliyun.com/zh/model-studio/models', apiBase: 'https://dashscope.aliyuncs.com/compatible-mode/v1', authEnv: 'FH_MODEL_REGISTRY_KEY_ALIBABA_MODEL_STUDIO',

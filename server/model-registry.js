@@ -42,12 +42,30 @@ function providerMeta(provider) {
 function pricing(raw, provider) {
   const p = asObject(raw && raw.pricing);
   const meta = providerMeta(provider);
+  const rawModelId = text(raw && (raw.id || raw.model || raw.name)).replace(/^models\//, '');
   const xaiPrice = key => {
     const rawValue = numberOrNull(raw && raw[key]);
     return rawValue == null ? null : rawValue / 1000000;
   };
   const field = key => numberOrNull(p[key]);
   const hasNestedPrice = Object.keys(p).length > 0;
+  const overrides = asObject(meta.pricingOverrides);
+  const override = !hasNestedPrice
+    ? asObject(overrides[rawModelId] || (rawModelId === text(meta.defaultModel) ? meta.defaultPricing : null))
+    : {};
+  if (Object.keys(override).length) {
+    return {
+      unit: text(override.unit) || 'USD_per_token',
+      currency: text(override.currency) || 'USD',
+      prompt: numberOrNull(override.prompt),
+      completion: numberOrNull(override.completion),
+      cachedPrompt: numberOrNull(override.cachedPrompt),
+      request: numberOrNull(override.request),
+      image: numberOrNull(override.image),
+      audio: numberOrNull(override.audio),
+      source: text(override.source) || 'official_pricing_page'
+    };
+  }
   const xai = !hasNestedPrice && meta.xaiPricingUnit === 'micro_usd_per_token';
   return {
     unit: 'USD_per_token',

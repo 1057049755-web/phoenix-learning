@@ -21,10 +21,23 @@
   function providerMeta(id) {
     var key = String(id || '');
     var providers = modelCatalog().providers || [];
-    return providers.find(function (item) { return item.slug === key || item.id === key; }) || null;
+    var catalogProvider = providers.find(function (item) { return item.slug === key || item.id === key; });
+    if (catalogProvider) return catalogProvider;
+    var fallback = window.AI && window.AI.PROVIDERS && window.AI.PROVIDERS[key];
+    if (!fallback) return null;
+    return Object.assign({ id: key, slug: key, kind: 'official_api', status: 'local-default' }, fallback, {
+      name: fallback.name || key,
+      apiBase: fallback.endpoint || '',
+      metadata: fallback.metadata || {}
+    });
   }
   function providerOptions() {
-    var providers = modelCatalog().providers || [];
+    var providers = (modelCatalog().providers || []).slice();
+    var known = providers.map(function (item) { return item.slug || item.id; });
+    var fallbackProviders = window.AI && window.AI.PROVIDERS || {};
+    Object.keys(fallbackProviders).forEach(function (key) {
+      if (key !== 'custom' && known.indexOf(key) < 0) providers.push(providerMeta(key));
+    });
     var official = providers.filter(function (item) { return item.kind !== 'aggregator'; });
     var aggregators = providers.filter(function (item) { return item.kind === 'aggregator'; });
     var render = function (items) { return items.map(function (item) { return '<option value="' + esc(item.slug) + '">' + esc(item.name || item.slug) + '</option>'; }).join(''); };
@@ -39,6 +52,24 @@
     var meta = providerMeta(key);
     var models = modelCatalog().models || [];
     return models.filter(function (item) { return item.providerId === key || (meta && item.providerId === meta.id) || String(item.canonicalKey || '').indexOf(key + ':') === 0; });
+  }
+  function defaultModelForProvider(id) {
+    var meta = providerMeta(id) || {};
+    var metadata = meta.metadata || {};
+    return metadata.defaultModel || meta.model || '';
+  }
+  function fallbackModel(providerId, modelId) {
+    var meta = providerMeta(providerId) || {};
+    var metadata = meta.metadata || {};
+    if (!modelId || modelId !== (metadata.defaultModel || meta.model)) return null;
+    return {
+      providerId: meta.id || providerId,
+      providerModelId: modelId,
+      officialName: metadata.defaultModelName || modelId,
+      pricing: metadata.defaultPricing || null,
+      pricingUrl: meta.pricingUrl || null,
+      status: 'directory-default'
+    };
   }
   function money(value) {
     var number = Number(value);
@@ -85,8 +116,8 @@
     var profiles = window.AI.getProfiles();
     var activeId = window.AI.getConfig().activeProfileId || (profiles[0] && profiles[0].id) || '';
     var selectedId = activeId;
-    var draft = selectedId ? window.AI.getProfile(selectedId, false) : window.AI.defaultProfile('openrouter');
-    if (!draft) draft = window.AI.defaultProfile('openrouter');
+    var draft = selectedId ? window.AI.getProfile(selectedId, false) : window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu');
+    if (!draft) draft = window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu');
     var clearKeyRequested = false;
     var internalToastTimer;
 
@@ -145,17 +176,17 @@
       if (!items.length && !selected) options += '<option value="" disabled>刷新官方目录后显示模型</option>';
       select.innerHTML = options;
       select.value = selected || '';
-      var useManual = !items.length && !selected && !providerMeta(providerId);
+      var useManual = !items.length;
       select.style.display = useManual ? 'none' : '';
       if (manual) { manual.style.display = useManual ? '' : 'none'; manual.disabled = !canEdit || !useManual; manual.value = useManual ? (selected || '') : ''; }
       var current = items.find(function (item) { return item.providerModelId === select.value; });
-      paintModelPrice(current || null);
+      paintModelPrice(current || fallbackModel(providerId, selected) || null);
     }
     function refreshProviderOptions(selected) {
       var select = field('provider');
       if (!select) return;
       select.innerHTML = providerOptions();
-      var value = selected || select.value || 'openrouter';
+      var value = selected || select.value || window.AI.DEFAULT_PROVIDER || 'zhipu';
       if (!providerMeta(value) && !Array.prototype.some.call(select.options, function (item) { return item.value === value; })) {
         select.insertAdjacentHTML('beforeend', '<option value="' + esc(value) + '">当前配置服务商 · ' + esc(value) + '</option>');
       }
@@ -203,7 +234,7 @@
       list.querySelectorAll('[data-ai-profile]').forEach(function (button) {
         button.addEventListener('click', function () {
           selectedId = button.getAttribute('data-ai-profile');
-          draft = window.AI.getProfile(selectedId, false) || window.AI.defaultProfile('openrouter');
+          draft = window.AI.getProfile(selectedId, false) || window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu');
           clearKeyRequested = false;
           activeId = window.AI.getConfig().activeProfileId || activeId;
           renderEditor(); renderProfiles();
@@ -211,12 +242,12 @@
       });
     }
     function renderEditor() {
-      var profile = draft || window.AI.defaultProfile('openrouter');
+      var profile = draft || window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu');
       field('name').value = profile.name || '';
-      refreshProviderOptions(profile.provider || 'openrouter');
+      refreshProviderOptions(profile.provider || window.AI.DEFAULT_PROVIDER || 'zhipu');
       field('protocol').value = profile.protocol || 'openai-chat';
       field('baseUrl').value = profile.baseUrl || baseFromEndpoint(profile.endpoint || '');
-      renderModelChoices(profile.provider || 'openrouter', profile.model || '');
+      renderModelChoices(profile.provider || window.AI.DEFAULT_PROVIDER || 'zhipu', profile.model || '');
       field('apiKey').value = '';
       field('headers').value = profile.headers || '';
       root.querySelectorAll('[data-ai-route]').forEach(function (route) { route.classList.toggle('is-active', route.getAttribute('data-ai-route') === (profile.mode || 'auto')); var radio = route.querySelector('input'); if (radio) radio.checked = route.classList.contains('is-active'); });
@@ -230,7 +261,7 @@
       var last = profile.lastTest ? { ok: profile.lastTest.ok, route: profile.lastTest.route, message: profile.lastTest.message } : null;
       paintStatus(last);
       query('[data-ai-foot-status]').textContent = last ? (last.message || '已记录最近一次检测') : '连接配置只保存在当前设备，可随时切换。';
-      paintProviderMeta(profile.provider || 'openrouter');
+      paintProviderMeta(profile.provider || window.AI.DEFAULT_PROVIDER || 'zhipu');
       updateRouteNote();
     }
     function updateRouteNote() {
@@ -245,7 +276,7 @@
       field('baseUrl').value = p.apiBase || baseFromEndpoint(p.endpoint || '');
       field('protocol').value = (p.metadata && p.metadata.protocol) || p.protocol || 'openai-chat';
       draft.endpointPath = (p.metadata && p.metadata.endpointPath) || '';
-      renderModelChoices(selectedProvider, '');
+      renderModelChoices(selectedProvider, defaultModelForProvider(selectedProvider));
       paintProviderMeta(selectedProvider);
       query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm());
       updateRouteNote();
@@ -258,15 +289,19 @@
     field('baseUrl').addEventListener('input', function () { query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); });
     field('model').addEventListener('change', function () {
       var item = modelsForProvider(field('provider').value).find(function (model) { return model.providerModelId === field('model').value; });
-      paintModelPrice(item || null);
+      paintModelPrice(item || fallbackModel(field('provider').value, field('model').value) || null);
       query('[data-ai-editor-title]').textContent = field('name').value.trim() || '新连接';
     });
-    query('[data-ai-manual-model]').addEventListener('input', function () { query('[data-ai-model-price]').textContent = '价格/收费：自定义接口，收费由服务商官方定价。'; });
+    query('[data-ai-manual-model]').addEventListener('input', function () {
+      var value = query('[data-ai-manual-model]').value.trim();
+      paintModelPrice(fallbackModel(field('provider').value, value));
+      if (!value || !fallbackModel(field('provider').value, value)) query('[data-ai-model-price]').textContent = '价格/收费：自定义模型，收费由服务商官方定价。';
+    });
     field('name').addEventListener('input', function () { query('[data-ai-editor-title]').textContent = field('name').value.trim() || '新连接'; });
     root.querySelectorAll('[data-ai-route]').forEach(function (route) { route.addEventListener('click', function () { if (!canEdit) return; root.querySelectorAll('[data-ai-route]').forEach(function (item) { item.classList.remove('is-active'); }); route.classList.add('is-active'); route.querySelector('input').checked = true; updateRouteNote(); }); });
     query('[data-ai-clear-key]').addEventListener('click', function () { if (!canEdit) return; clearKeyRequested = true; field('apiKey').value = ''; query('[data-ai-key-state]').textContent = '将被清除'; query('[data-ai-key-help]').textContent = '保存后会删除当前设备上的 Key；如需保留，请直接关闭窗口。'; });
-    query('[data-ai-new]').addEventListener('click', function () { if (!canEdit) return; draft = window.AI.defaultProfile('openrouter'); selectedId = draft.id; clearKeyRequested = false; renderEditor(); renderProfiles(); });
-    query('[data-ai-delete]').addEventListener('click', function () { if (!canEdit || !selectedId || !window.AI.getProfile(selectedId)) return; if (!window.confirm('删除这组 AI 连接配置？')) return; window.AI.removeProfile(selectedId); var next = window.AI.getProfiles()[0]; if (next) { selectedId = next.id; draft = window.AI.getProfile(selectedId, false); } else { selectedId = ''; draft = window.AI.defaultProfile('openrouter'); } clearKeyRequested = false; renderEditor(); renderProfiles(); notify('连接配置已删除', 'success'); });
+    query('[data-ai-new]').addEventListener('click', function () { if (!canEdit) return; draft = window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu'); selectedId = draft.id; clearKeyRequested = false; renderEditor(); renderProfiles(); });
+    query('[data-ai-delete]').addEventListener('click', function () { if (!canEdit || !selectedId || !window.AI.getProfile(selectedId)) return; if (!window.confirm('删除这组 AI 连接配置？')) return; window.AI.removeProfile(selectedId); var next = window.AI.getProfiles()[0]; if (next) { selectedId = next.id; draft = window.AI.getProfile(selectedId, false); } else { selectedId = ''; draft = window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu'); } clearKeyRequested = false; renderEditor(); renderProfiles(); notify('连接配置已删除', 'success'); });
     query('[data-ai-test]').addEventListener('click', async function () {
       var button = query('[data-ai-test]'); var value = draftFromForm();
       if (!value.baseUrl || !value.model) { paintStatus({ ok: false }); query('[data-ai-foot-status]').textContent = '请先填写 Base URL 和模型 ID'; return; }

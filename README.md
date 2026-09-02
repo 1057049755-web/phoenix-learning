@@ -58,4 +58,4 @@
 4. 检查 `/api/ping`、`/api/health`、`/api/ai/status` 与登录链路。
 5. 记录构建版本、提交号和部署时间。
 
-模型目录同步可在 Cloudflare 定时触发器中调用 Worker 的 `scheduled` 入口；每次同步会在 D1 中保留运行记录和变更快照。教材与地区卷型按 `server/migrations/003_official_reference_catalog.sql` 版本化入库，模型注册中心由 `004` 初始化、`005` 完成旧目录备份与清空、`006`、`008` 和 `009` 扩展官方网络 API 服务商入口。学习闭环与资料字段由 `007_learning_loop_and_sources.sql` 建立。
+模型目录同步可在 Cloudflare 定时触发器中调用 Worker 的 `scheduled` 入口；每次同步会在 D1 中保留运行记录和变更快照。教材与地区卷型按 `server/migrations/003_official_reference_catalog.sql` 版本化入库，模型注册中心由 `004` 初始化、`005` 完成旧目录备份与清空、`006`、`008`、`009` 扩展官方网络 API 服务商入口，`010_zhipu_glm_default.sql` 登记智谱官方接口并将 GLM-4-Flash-250414 设为默认入口。学习闭环与资料字段由 `007_learning_loop_and_sources.sql` 建立。
