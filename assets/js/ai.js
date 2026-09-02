@@ -183,17 +183,18 @@
     const catalog = window.FH_REFERENCE_DATA && typeof window.FH_REFERENCE_DATA.getModels === 'function' ? window.FH_REFERENCE_DATA.getModels() : null;
     const item = catalog && Array.isArray(catalog.providers) ? catalog.providers.find(provider => provider.slug === key || provider.id === key) : null;
     if (item) {
+      const local = PROVIDERS[key] || {};
       const metadata = item.metadata || {};
       return {
         name: item.name || key,
-        endpoint: item.apiBase || '',
+        endpoint: key === 'google-ai-studio' && local.endpoint ? local.endpoint : (item.apiBase || local.endpoint || ''),
         endpointPath: metadata.endpointPath || '',
-        model: metadata.defaultModel || '',
+        model: metadata.defaultModel || local.model || '',
         defaultName: metadata.defaultName || '',
-        metadata: metadata,
-        auth: metadata.authHeader === 'x-api-key' ? 'x-api-key' : 'bearer',
-        authHeader: metadata.authHeader || 'Authorization',
-        protocol: metadata.protocol || 'openai-chat',
+        metadata: Object.assign({}, local.metadata || {}, metadata),
+        auth: metadata.authHeader === 'x-api-key' ? 'x-api-key' : (local.auth || 'bearer'),
+        authHeader: metadata.authHeader || local.authHeader || 'Authorization',
+        protocol: PROTOCOLS[metadata.protocol] ? metadata.protocol : (local.protocol || 'openai-chat'),
         keyHint: item.docsUrl ? '打开服务商官方文档申请 API Key；具体模型从官方目录选择。' : '填写服务商 API Key。'
       };
     }

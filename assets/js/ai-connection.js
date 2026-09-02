@@ -39,8 +39,15 @@
     var key = String(id || '');
     var providers = modelCatalog().providers || [];
     var catalogProvider = providers.find(function (item) { return item.slug === key || item.id === key; });
-    if (catalogProvider) return catalogProvider;
     var fallback = window.AI && window.AI.PROVIDERS && window.AI.PROVIDERS[key];
+    if (catalogProvider) {
+      var merged = Object.assign({}, fallback || {}, catalogProvider);
+      merged.metadata = Object.assign({}, fallback && fallback.metadata || {}, catalogProvider.metadata || {});
+      /* Google 的官方目录地址与其 OpenAI 兼容调用地址不同，保留本地预置的兼容地址。 */
+      if (key === 'google-ai-studio' && fallback && fallback.endpoint) merged.apiBase = fallback.endpoint;
+      if (!merged.protocol || !window.AI.PROTOCOLS[merged.protocol]) merged.protocol = fallback && fallback.protocol || 'openai-chat';
+      return merged;
+    }
     if (!fallback) return null;
     return Object.assign({ id: key, slug: key, kind: 'official_api', status: 'local-preset' }, fallback, {
       name: fallback.name || key,
@@ -125,7 +132,9 @@
     var opts = options || {};
     var root = opts.root;
     if (!root || !window.AI) return;
-    var canEdit = !!opts.isAdmin;
+    /* 无后端模式的连接只作用于当前浏览器，任何登录身份都可以维护自己的本地连接。 */
+    var localOnly = !!(window.AI.getConfig && window.AI.getConfig().localOnly);
+    var canEdit = localOnly || !!opts.isAdmin;
     var profiles = window.AI.getProfiles();
     var activeId = window.AI.getConfig().activeProfileId || (profiles[0] && profiles[0].id) || '';
     var selectedId = activeId;
@@ -169,6 +178,12 @@
       var protocol = protocols[value.protocol] || protocols['openai-chat'];
       var base = baseFromEndpoint(value.baseUrl || value.endpoint);
       return base ? base + (value.endpointPath || protocol.suffix) : '填写 Base URL 后生成';
+    }
+    function resetModelFilters() {
+      modelSearch = ''; modelFilter = 'all';
+      var search = query('[data-ai-model-search]'); var filter = query('[data-ai-model-filter]');
+      if (search) search.value = '';
+      if (filter) filter.value = 'all';
     }
     function paintProviderMeta(providerId) {
       var meta = providerMeta(providerId);
@@ -217,7 +232,7 @@
       var visibleItems = allItems.filter(modelMatches);
       var options = '<option value="">' + (allItems.length ? '选择具体模型' : '暂无模型目录，请手动填写') + '</option>';
       if (visibleItems.length) options += visibleItems.map(function (item) { return '<option value="' + esc(item.providerModelId) + '">' + esc(item.officialName || item.providerModelId) + ' · ' + esc(item.providerModelId) + '</option>'; }).join('');
-      if (selected && !allItems.some(function (item) { return item.providerModelId === selected; })) options += '<option value="' + esc(selected) + '">当前配置 · ' + esc(selected) + '</option>';
+      if (selected && !visibleItems.some(function (item) { return item.providerModelId === selected; })) options += '<option value="' + esc(selected) + '">当前选择 · ' + esc(selected) + '</option>';
       select.innerHTML = options;
       select.style.display = manualMode ? 'none' : '';
       select.value = selected || '';
@@ -257,8 +272,11 @@
       var provider = field('provider').value;
       var meta = providerMeta(provider) || {};
       var metadata = meta.metadata || {};
+      var providerProtocol = metadata.protocol || meta.protocol || 'openai-chat';
+      if (!window.AI.PROTOCOLS[providerProtocol]) providerProtocol = meta.protocol && window.AI.PROTOCOLS[meta.protocol] ? meta.protocol : 'openai-chat';
+      resetModelFilters();
       field('baseUrl').value = meta.apiBase || meta.endpoint || '';
-      field('protocol').value = metadata.protocol || meta.protocol || 'openai-chat';
+      field('protocol').value = providerProtocol;
       field('endpointPath').value = metadata.endpointPath || '';
       field('model').value = metadata.defaultModel || meta.model || '';
       localModels = []; localModelsProvider = ''; manualMode = !defaultModelForProvider(provider);
@@ -272,7 +290,7 @@
       var current = window.AI.getProfiles().filter(function (profile) { return !search || (profile.name + ' ' + profile.providerName + ' ' + profile.model).toLowerCase().indexOf(search) >= 0; });
       if (!current.length) { list.innerHTML = '<div class="fh-ai-empty">' + (search ? '没有找到匹配的连接。' : '还没有连接配置，点击上方“＋”创建。') + '</div>'; return; }
       list.innerHTML = current.map(function (profile) { var isActive = profile.id === activeId; return '<button class="fh-ai-profile' + (profile.id === selectedId ? ' is-selected' : '') + '" type="button" data-ai-profile="' + esc(profile.id) + '"><span class="fh-ai-profile__top"><span class="fh-ai-profile__name">' + esc(profile.name) + '</span><span class="fh-ai-profile__state ' + (isActive ? 'is-active' : '') + '">' + (isActive ? '当前' : '') + '</span></span><span class="fh-ai-profile__provider">' + esc(profile.providerName || profile.provider) + '</span><span class="fh-ai-profile__meta"><span>' + esc(profile.model || '未填写模型') + '</span><span class="fh-ai-key-dot ' + (profile.hasKey ? 'has-key' : '') + '">' + (profile.hasKey ? '已配置 Key' : '未配置 Key') + '</span></span></button>'; }).join('');
-      list.querySelectorAll('[data-ai-profile]').forEach(function (button) { button.addEventListener('click', function () { selectedId = button.getAttribute('data-ai-profile'); draft = window.AI.getProfile(selectedId, false) || window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu'); clearKeyRequested = false; localModels = []; localModelsProvider = ''; manualMode = false; renderEditor(); renderProfiles(); }); });
+      list.querySelectorAll('[data-ai-profile]').forEach(function (button) { button.addEventListener('click', function () { selectedId = button.getAttribute('data-ai-profile'); draft = window.AI.getProfile(selectedId, false) || window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu'); clearKeyRequested = false; localModels = []; localModelsProvider = ''; manualMode = false; resetModelFilters(); renderEditor(); renderProfiles(); window.setTimeout(readModelsIfReady, 0); }); });
     }
     function renderEditor() {
       var profile = draft || window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu');
@@ -310,15 +328,19 @@
       catch (error) { query('[data-ai-foot-status]').textContent = error.message || '官方模型列表读取失败'; notify(error.message || '模型列表读取失败', 'error'); }
       finally { button.disabled = !canEdit; button.classList.remove('is-loading'); button.querySelector('span').textContent = '从官方读取'; }
     }
+    function readModelsIfReady() {
+      var profile = selectedId ? window.AI.getProfile(selectedId, true) : null;
+      if (profile && profile.apiKey && !localModels.length) readOfficialModels();
+    }
     function close() { root.innerHTML = ''; }
 
-    query('[data-ai-close]').addEventListener('click', close); query('[data-ai-cancel]').addEventListener('click', close); query('.fh-ai-mask').addEventListener('click', function (event) { if (event.target === event.currentTarget) close(); }); query('[data-ai-profile-search]').addEventListener('input', renderProfiles); query('[data-ai-provider]').addEventListener('change', setProviderDefaults); query('[data-ai-model-search]').addEventListener('input', function () { modelSearch = this.value; renderModelChoices(field('provider').value, manualMode ? query('[data-ai-manual-model]').value : field('model').value); }); query('[data-ai-model-filter]').addEventListener('change', function () { modelFilter = this.value; renderModelChoices(field('provider').value, manualMode ? query('[data-ai-manual-model]').value : field('model').value); }); query('[data-ai-models]').addEventListener('click', readOfficialModels); query('[data-ai-manual-toggle]').addEventListener('click', function () { manualMode = !manualMode; renderModelChoices(field('provider').value, manualMode ? (field('model').value || defaultModelForProvider(field('provider').value)) : (query('[data-ai-manual-model]').value || field('model').value)); }); query('[data-ai-field="model"]').addEventListener('change', function () { paintModelPrice(modelItems(field('provider').value).find(function (item) { return item.providerModelId === field('model').value; }) || fallbackModel(field('provider').value, field('model').value)); }); query('[data-ai-manual-model]').addEventListener('input', function () { paintModelPrice(fallbackModel(field('provider').value, this.value) || null); }); query('[data-ai-key-toggle]').addEventListener('click', function () { var input = field('apiKey'); var shown = input.type === 'text'; input.type = shown ? 'password' : 'text'; this.setAttribute('aria-label', shown ? '显示 API Key' : '隐藏 API Key'); }); query('[data-ai-clear-key]').addEventListener('click', function () { if (!canEdit) return; clearKeyRequested = true; field('apiKey').value = ''; query('[data-ai-key-state]').textContent = '保存时清除'; query('[data-ai-key-help]').textContent = '点击“保存并启用”后会删除此设备上的 Key；如需保留，请关闭窗口。'; }); query('[data-ai-advanced-toggle]').addEventListener('click', function () { advancedOpen = !advancedOpen; query('[data-ai-advanced]').hidden = !advancedOpen; this.setAttribute('aria-expanded', String(advancedOpen)); }); query('[data-ai-field="baseUrl"]').addEventListener('input', function () { query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); }); query('[data-ai-field="protocol"]').addEventListener('change', function () { query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); }); query('[data-ai-field="endpointPath"]').addEventListener('input', function () { query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); }); query('[data-ai-field="name"]').addEventListener('input', function () { query('[data-ai-editor-title]').textContent = this.value.trim() || '新连接'; });
-    query('[data-ai-new]').addEventListener('click', function () { if (!canEdit) return; draft = window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu'); selectedId = draft.id; clearKeyRequested = false; localModels = []; localModelsProvider = ''; manualMode = false; renderEditor(); renderProfiles(); });
+    query('[data-ai-close]').addEventListener('click', close); query('[data-ai-cancel]').addEventListener('click', close); query('.fh-ai-mask').addEventListener('click', function (event) { if (event.target === event.currentTarget) close(); }); query('[data-ai-profile-search]').addEventListener('input', renderProfiles); query('[data-ai-provider]').addEventListener('change', setProviderDefaults); query('[data-ai-model-search]').addEventListener('input', function () { modelSearch = this.value; renderModelChoices(field('provider').value, manualMode ? query('[data-ai-manual-model]').value : field('model').value); }); query('[data-ai-model-filter]').addEventListener('change', function () { modelFilter = this.value; renderModelChoices(field('provider').value, manualMode ? query('[data-ai-manual-model]').value : field('model').value); }); query('[data-ai-models]').addEventListener('click', readOfficialModels); query('[data-ai-manual-toggle]').addEventListener('click', function () { manualMode = !manualMode; renderModelChoices(field('provider').value, manualMode ? (field('model').value || defaultModelForProvider(field('provider').value)) : (query('[data-ai-manual-model]').value || field('model').value)); }); query('[data-ai-field="model"]').addEventListener('change', function () { paintModelPrice(modelItems(field('provider').value).find(function (item) { return item.providerModelId === field('model').value; }) || fallbackModel(field('provider').value, field('model').value)); }); query('[data-ai-manual-model]').addEventListener('input', function () { paintModelPrice(fallbackModel(field('provider').value, this.value) || null); }); query('[data-ai-key-toggle]').addEventListener('click', function () { var input = field('apiKey'); var shown = input.type === 'text'; input.type = shown ? 'password' : 'text'; this.setAttribute('aria-label', shown ? '显示 API Key' : '隐藏 API Key'); }); query('[data-ai-clear-key]').addEventListener('click', function () { if (!canEdit) return; clearKeyRequested = true; field('apiKey').value = ''; query('[data-ai-key-state]').textContent = '保存时清除'; query('[data-ai-key-help]').textContent = '点击“保存并启用”后会删除此设备上的 Key；如需保留，请关闭窗口。'; }); query('[data-ai-advanced-toggle]').addEventListener('click', function () { advancedOpen = !advancedOpen; query('[data-ai-advanced]').hidden = !advancedOpen; this.setAttribute('aria-expanded', String(advancedOpen)); }); query('[data-ai-field="baseUrl"]').addEventListener('input', function () { query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); }); query('[data-ai-field="protocol"]').addEventListener('change', function () { query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); }); query('[data-ai-field="endpointPath"]').addEventListener('input', function () { query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); }); query('[data-ai-field="name"]').addEventListener('input', function () { query('[data-ai-editor-title]').textContent = this.value.trim() || '新连接'; }); query('[data-ai-field="apiKey"]').addEventListener('blur', function () { if (this.value.trim()) window.setTimeout(readOfficialModels, 0); });
+    query('[data-ai-new]').addEventListener('click', function () { if (!canEdit) return; draft = window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu'); selectedId = draft.id; clearKeyRequested = false; localModels = []; localModelsProvider = ''; manualMode = false; resetModelFilters(); renderEditor(); renderProfiles(); });
     query('[data-ai-delete]').addEventListener('click', function () { if (!canEdit || !selectedId || !window.AI.getProfile(selectedId)) return; if (!window.confirm('删除这组 AI 连接配置？')) return; window.AI.removeProfile(selectedId); var next = window.AI.getProfiles()[0]; if (next) { selectedId = next.id; draft = window.AI.getProfile(selectedId, false); } else { selectedId = ''; draft = window.AI.defaultProfile(window.AI.DEFAULT_PROVIDER || 'zhipu'); } clearKeyRequested = false; renderEditor(); renderProfiles(); notify('连接配置已删除', 'success'); });
     query('[data-ai-test]').addEventListener('click', async function () { var value = draftFromForm(); if (!value.baseUrl || !value.model) { paintStatus({ ok: false, message: '请先填写 Base URL 和模型 ID' }); query('[data-ai-foot-status]').textContent = '请先填写 Base URL 和模型 ID'; return; } var button = query('[data-ai-test]'); button.disabled = true; button.innerHTML = icon('refresh') + '检测中…'; paintStatus({ loading: true }); try { var result = await window.AI.testProfile(value); paintStatus(result); query('[data-ai-foot-status]').textContent = result.message || '检测完成'; if (result.ok) notify('AI 连接测试通过', 'success'); } catch (error) { var failure = { ok: false, message: error.message || '检测失败' }; paintStatus(failure); query('[data-ai-foot-status]').textContent = failure.message; } finally { button.disabled = false; button.innerHTML = icon('check') + '检测连接'; } });
     query('[data-ai-save]').addEventListener('click', function () { if (!canEdit) return; var value = validate(); if (!value) return; try { var saved = window.AI.saveProfile(value, { activate: true }); selectedId = saved.id; activeId = saved.id; draft = window.AI.getProfile(selectedId, false); clearKeyRequested = false; renderEditor(); renderProfiles(); notify('连接已保存并启用', 'success'); } catch (error) { notify(error.message || '保存失败', 'error'); } });
     query('[data-ai-form]').addEventListener('submit', function (event) { event.preventDefault(); query('[data-ai-save]').click(); }); root.addEventListener('keydown', function (event) { if (event.key === 'Escape') close(); });
-    renderEditor(); renderProfiles();
+    renderEditor(); renderProfiles(); window.setTimeout(readModelsIfReady, 0);
   }
 
   window.FH_AI_SETTINGS = { open: open };

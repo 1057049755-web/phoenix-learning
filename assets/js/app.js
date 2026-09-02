@@ -3434,7 +3434,7 @@
     const tab = ['members', 'classes', 'notices', 'permissions'].includes(requestedTab) ? requestedTab : 'members';
     const tabs = [['members', '成员管理'], ['classes', '班级管理'], ['notices', '公告管理'], ['permissions', '权限设置']];
     const head =
-      '<div class="page-head"><div><h1 class="page-title">学校管理</h1><p class="page-sub">管理本权限范围内的成员、班级、公告与学校服务</p></div><div class="page-head-actions"><button class="btn btn-outline" id="admin-network-open">网络接入</button><button class="btn btn-outline" id="admin-ai-open">AI 服务状态</button></div></div>' +
+      '<div class="page-head"><div><h1 class="page-title">学校管理</h1><p class="page-sub">管理本权限范围内的成员、班级、公告与学校服务</p></div><div class="page-head-actions"><button class="btn btn-outline" id="admin-network-open">网络接入</button><button class="btn btn-outline" id="admin-ai-open">AI 连接中心</button></div></div>' +
       '<div class="admin-tabs">' + tabs.map(t =>
         '<button class="admin-tab' + (tab === t[0] ? ' active' : '') + '" data-atab="' + t[0] + '">' + esc(t[1]) + '</button>').join('') + '</div>';
 
