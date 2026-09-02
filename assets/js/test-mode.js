@@ -3,6 +3,7 @@
 
   var SESSION_KEY = 'fh_test_session_v1';
   var DATA_KEY = 'fh_test_demo_data_v1';
+  var PUBLIC_TEST_HOSTS = ['phoenixlearning.xyz', 'www.phoenixlearning.xyz', '1057049755-web.github.io'];
   var roleLabels = { student: '学生', teacher: '教师', academic: '教务处', admin: '系统管理员' };
 
   function isLocalHost() {
@@ -13,9 +14,13 @@
     return /(^|\.)((pages|preview|staging)\.|pages\.dev$|vercel\.app$|netlify\.app$)/i.test(location.hostname || '');
   }
 
+  function isPublicTestHost() {
+    return PUBLIC_TEST_HOSTS.indexOf(String(location.hostname || '').toLowerCase()) >= 0;
+  }
+
   function isEnabled() {
     var config = window.FH_CONFIG && typeof window.FH_CONFIG === 'object' ? window.FH_CONFIG : {};
-    return config.enableTestAccess === true || window.FH_TEST_ACCESS === true || isLocalHost() || isPreviewHost();
+    return config.enableTestAccess === true || window.FH_TEST_ACCESS === true || isLocalHost() || isPreviewHost() || isPublicTestHost();
   }
 
   function read(key, storage) {
