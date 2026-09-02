@@ -1,3 +1,5 @@
+@import url("internal-ui.css?v=internal-1");
+
 /* 凤凰花·智学 AI 连接中心：偏配置工作台的密度，保留当前项目的青蓝色调。 */
 .fh-ai-dialog { width:min(960px,calc(100vw - 32px)); max-width:960px; max-height:92vh; min-height:0; display:flex; flex-direction:column; overflow:hidden; padding:0; color:#28485d; background:#f7fbfc; border:1px solid rgba(62,123,145,.17); box-shadow:0 24px 80px rgba(25,67,89,.22); }
 .fh-ai-dialog__head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:24px 26px 20px; background:linear-gradient(135deg,#f9ffff,#edf7f8); border-bottom:1px solid #dcebed; }
