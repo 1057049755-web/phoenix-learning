@@ -1252,6 +1252,12 @@
   };
 
   window.addEventListener('hashchange', window.__router);
+  window.addEventListener('fh-ai-config-changed', function () {
+    if (state.loggedIn) renderShell();
+  });
+  window.addEventListener('fh-ai-status-changed', function () {
+    if (state.loggedIn) renderShell();
+  });
 
   /* ---------- 顶栏交互 ---------- */
   function setSidebar(open) {

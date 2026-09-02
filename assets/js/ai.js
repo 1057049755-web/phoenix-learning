@@ -313,20 +313,33 @@
     return publicProfile(store.profiles.find(item => item.id === id));
   }
   function emitConfigChange() {
+    publishStatus(null);
     try { window.dispatchEvent(new CustomEvent('fh-ai-config-changed', { detail: getConfig() })); } catch (e) {}
+    serverStatus().then(publishStatus).catch(() => {});
+  }
+
+  function publishStatus(status) {
+    window.__FH_AI_STATUS__ = status || null;
+    try { window.dispatchEvent(new CustomEvent('fh-ai-status-changed', { detail: status || null })); } catch (e) {}
   }
 
   function isConfigured() {
-    return true; // 即使无模型也允许进入本地审核题库模式
+    const p = activeProfile(true);
+    const status = window.__FH_AI_STATUS__;
+    const directReady = !!(p && p.mode !== 'relay' && canUseDirect(p));
+    const relayReady = !!(status && status.configured && status.route === 'relay' && (!p || p.mode !== 'direct'));
+    return directReady || relayReady;
   }
 
   function providerLabel() {
     const p = activeProfile(true);
-    if (window.__FH_AI_STATUS__ && window.__FH_AI_STATUS__.configured) return '学校 AI 服务';
-    if (p && p.model && endpointFor(p) && (p.apiKey || providerOf(p.provider).auth === 'none' || providerOf(p.provider).auth === 'optional')) {
+    const status = window.__FH_AI_STATUS__;
+    if (status && status.configured && status.route === 'relay' && (!p || p.mode !== 'direct')) return '学校 AI 服务';
+    if (p && p.mode !== 'relay' && canUseDirect(p)) {
       return (providerOf(p.provider).name || 'AI 连接') + ' · ' + p.model;
     }
-    return '本地审核题库';
+    if (p && p.mode === 'relay') return '服务端 AI 未连接';
+    return '未连接 AI 服务';
   }
 
   /* ---------- 通用对话 ---------- */
@@ -1491,5 +1504,5 @@
     beautifyResource: beautifyResource,
     testConnection: testConnection
   };
-  serverStatus().then(s => { window.__FH_AI_STATUS__ = s; }).catch(() => {});
+  serverStatus().then(publishStatus).catch(() => publishStatus(null));
 })();

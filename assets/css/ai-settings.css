@@ -1,4 +1,6 @@
 /* 凤凰花·智学 AI 连接中心：偏配置工作台的密度，保留当前项目的青蓝色调。 */
+html.fh-ai-modal-open, html.fh-ai-modal-open body { overflow:hidden; }
+.fh-ai-mask { overscroll-behavior:contain; }
 .fh-ai-dialog { width:min(960px,calc(100vw - 32px)); max-width:960px; max-height:92vh; overflow:hidden; padding:0; color:#28485d; background:#f7fbfc; border:1px solid rgba(62,123,145,.17); box-shadow:0 24px 80px rgba(25,67,89,.22); }
 .fh-ai-dialog__head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:24px 26px 20px; background:linear-gradient(135deg,#f9ffff,#edf7f8); border-bottom:1px solid #dcebed; }
 .fh-ai-dialog__kicker { display:block; margin-bottom:7px; color:#4b929a; font-size:10px; font-weight:850; letter-spacing:.13em; text-transform:uppercase; }
@@ -6,8 +8,8 @@
 .fh-ai-dialog__subtitle { max-width:650px; margin:8px 0 0; color:#718895; font-size:11.5px; line-height:1.7; }
 .fh-ai-dialog__close { flex:none; width:42px; height:42px; display:grid; place-items:center; border:1px solid #d5e4e8; border-radius:12px; background:#fff; color:#6f8793; font-size:24px; line-height:1; cursor:pointer; }
 .fh-ai-dialog__close:hover { color:#315d70; background:#edf8f8; }
-.fh-ai-dialog__body { display:grid; grid-template-columns:268px minmax(0,1fr); min-height:530px; max-height:calc(92vh - 126px); overflow:hidden; }
-.fh-ai-profiles { min-width:0; padding:18px 14px; background:#eff7f8; border-right:1px solid #dcebed; overflow:auto; }
+.fh-ai-dialog__body { display:grid; grid-template-columns:268px minmax(0,1fr); min-height:0; max-height:calc(92vh - 126px); overflow:hidden; overscroll-behavior:contain; }
+.fh-ai-profiles { min-width:0; min-height:0; padding:18px 14px; background:#eff7f8; border-right:1px solid #dcebed; overflow:auto; overscroll-behavior:contain; }
 .fh-ai-profiles__head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 4px 12px; }
 .fh-ai-profiles__head h3 { margin:0; color:#395c6c; font-size:12px; }
 .fh-ai-profiles__head small { display:block; margin-top:3px; color:#8a9da5; font-size:10px; }
@@ -24,7 +26,7 @@
 .fh-ai-profile__meta { margin-top:9px; color:#9aaab1; font-size:9.5px; }
 .fh-ai-profile__meta span:last-child { color:#5a8d93; }
 .fh-ai-empty { padding:18px 10px; border:1px dashed #c9dfe2; border-radius:13px; color:#78909b; font-size:10.5px; line-height:1.65; text-align:center; }
-.fh-ai-editor { min-width:0; overflow:auto; background:#fff; }
+.fh-ai-editor { min-width:0; min-height:0; overflow:auto; background:#fff; overscroll-behavior:contain; }
 .fh-ai-editor__head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:20px 24px 15px; border-bottom:1px solid #e7eff0; }
 .fh-ai-editor__eyebrow { margin:0 0 5px; color:#88a0a8; font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
 .fh-ai-editor__head h3 { margin:0; color:#2e5367; font-size:18px; }
@@ -88,7 +90,7 @@
   .fh-ai-dialog__head { padding:19px 16px 16px; }
   .fh-ai-dialog__title { font-size:20px; }
   .fh-ai-dialog__subtitle { font-size:10.5px; }
-  .fh-ai-dialog__body { display:block; max-height:calc(96vh - 116px); overflow:auto; }
+  .fh-ai-dialog__body { display:block; max-height:calc(96vh - 116px); overflow:auto; overscroll-behavior:contain; }
   .fh-ai-profiles { padding:12px 14px; border-right:0; border-bottom:1px solid #dcebed; overflow:visible; }
   .fh-ai-profile-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .fh-ai-profile { min-height:76px; }
