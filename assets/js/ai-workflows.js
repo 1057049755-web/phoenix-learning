@@ -115,25 +115,19 @@
   }
 
   async function defaultRunner(messages, options) {
-    const network = window.FHNetwork;
-    if (!network || typeof network.url !== 'function' || typeof network.headers !== 'function') return { ok: false, code: 'NETWORK_NOT_CONFIGURED' };
-    const controller = new AbortController();
-    const timeout = Math.min(Math.max(Number(options && options.timeout || 45000), 5000), 90000);
-    const timer = setTimeout(() => controller.abort(), timeout);
-    const started = Date.now();
-    try {
-      const response = await fetch(network.url('/api/ai/chat'), {
-        method: 'POST', headers: network.headers({ 'Content-Type': 'application/json' }), signal: controller.signal,
-        body: JSON.stringify({ messages, maxTokens: Math.min(Number(options && options.maxTokens || 4000), 8000), temperature: Number(options && options.temperature || 0.15), workflow: options && options.workflow })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) return { ok: false, code: payload.code || 'AI_REQUEST_FAILED', message: payload.msg || 'AI 工作流请求失败', usage: { latencyMs: Date.now() - started } };
-      const output = extractJson(payload.content);
-      if (output == null) return { ok: false, code: 'INVALID_STRUCTURED_OUTPUT', message: '模型没有返回可解析的结构化结果', usage: { latencyMs: Date.now() - started, model: payload.model || '' } };
-      return { ok: true, output, model: payload.model || '', usage: { latencyMs: Date.now() - started } };
-    } catch (error) {
-      return { ok: false, code: error && error.name === 'AbortError' ? 'AI_TIMEOUT' : 'AI_NETWORK_ERROR', message: '在线 AI 服务暂时不可用', usage: { latencyMs: Date.now() - started } };
-    } finally { clearTimeout(timer); }
+    if (window.AI && typeof window.AI.chat === 'function') {
+      const started = Date.now();
+      try {
+        const content = await window.AI.chat(messages, { maxTokens: options && options.maxTokens, temperature: options && options.temperature, timeout: options && options.timeout, workflow: options && options.workflow });
+        const output = extractJson(content);
+        if (output == null) return { ok: false, code: 'INVALID_STRUCTURED_OUTPUT', message: '模型没有返回可解析的结构化结果', usage: { latencyMs: Date.now() - started } };
+        const config = window.AI.getConfig ? window.AI.getConfig() : {};
+        return { ok: true, output, model: config.model || '', usage: { latencyMs: Date.now() - started } };
+      } catch (error) {
+        return { ok: false, code: error && error.code || 'AI_NETWORK_ERROR', message: String(error && error.message || '本地浏览器 AI 请求失败'), usage: { latencyMs: Date.now() - started } };
+      }
+    }
+    return { ok: false, code: 'AI_NOT_AVAILABLE', message: '本地 AI 连接层未加载' };
   }
 
   async function run(key, input, options) {

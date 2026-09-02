@@ -135,18 +135,18 @@
   window.AI.isConfigured = isConfigured;
   window.AI.providerLabel = providerLabel;
   window.AI.runWorkflow = async function (messages, options) {
-    const network = window.FHNetwork;
-    if (!network || !network.url) return { ok: false, code: 'NETWORK_NOT_CONFIGURED' };
-    const config = window.AI.getConfig ? window.AI.getConfig() : {};
-    const profile = window.FH_AI_RUNTIME && window.FH_AI_RUNTIME.getActiveProfile ? window.FH_AI_RUNTIME.getActiveProfile() : (window.AI.getProfile ? window.AI.getProfile(config.activeProfileId, true) : null);
-    const body = { messages, maxTokens: options && options.maxTokens, temperature: options && options.temperature, workflow: options && options.workflow };
-    if (profile && profile.provider && profile.model && profile.apiKey) body.connection = { provider: profile.provider, protocol: profile.protocol, baseUrl: profile.baseUrl, model: profile.model, apiKey: profile.apiKey, headers: profile.headers || '' };
-    const response = await fetch(network.url('/api/ai/chat'), { method: 'POST', headers: network.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) return { ok: false, code: payload.code || 'AI_REQUEST_FAILED', message: payload.msg || '在线 AI 服务请求失败' };
-    let output = null;
-    try { output = JSON.parse(String(payload.content || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')); } catch (e) { return { ok: false, code: 'INVALID_STRUCTURED_OUTPUT' }; }
-    return { ok: true, output, model: payload.model || '', usage: payload.usage || {} };
+    const opts = options || {};
+    if (!window.AI || typeof window.AI.chat !== 'function') return { ok: false, code: 'AI_NOT_AVAILABLE', message: '本地 AI 连接层未加载' };
+    const started = Date.now();
+    try {
+      const content = await window.AI.chat(messages, { maxTokens: opts.maxTokens, temperature: opts.temperature, timeout: opts.timeout, workflow: opts.workflow });
+      let output = null;
+      try { output = JSON.parse(String(content || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')); } catch (e) { return { ok: false, code: 'INVALID_STRUCTURED_OUTPUT', message: '模型没有返回可解析的结构化结果', usage: { latencyMs: Date.now() - started } }; }
+      const config = window.AI.getConfig ? window.AI.getConfig() : {};
+      return { ok: true, output, model: config.model || '', usage: { latencyMs: Date.now() - started } };
+    } catch (error) {
+      return { ok: false, code: error && error.code || 'AI_REQUEST_FAILED', message: String(error && error.message || '本地浏览器 AI 请求失败'), usage: { latencyMs: Date.now() - started } };
+    }
   };
   window.FH_WORKFLOW_BRIDGE = Object.freeze({ run, generateQuestions, generateSection, gradeAnswer, generateExplanations, generateReport, legacy });
 })();

@@ -1,5 +1,5 @@
 /* 凤凰花·智学官方参考数据客户端
- * 只接收服务端 active 记录；失败时保持空目录，不生成本地章节、卷型或模型名单。
+ * 有业务后端时接收服务端 active 记录；无后端时保持空目录，不生成本地章节、卷型或模型名单。
  */
 (function () {
   'use strict';
@@ -17,6 +17,10 @@
     const url = network && network.url ? network.url(path) : path;
     const headers = network && network.headers ? network.headers() : {};
     return fetch(url, { headers }).then(response => response.ok ? response.json() : null).catch(() => null);
+  }
+  function remoteConfigured() {
+    const network = window.FHNetwork;
+    return !!((network && typeof network.configured === 'function' && network.configured()) || (window.FH_CONFIG && window.FH_CONFIG.backendEnabled === true));
   }
   function bookTerm(book) { return /下册|下/.test(text(book)) ? '下' : /全册|全/.test(text(book)) ? '全' : '上'; }
   function buildTextbooks(payload) {
@@ -75,11 +79,13 @@
     return catalog;
   }
   function loadCatalog(force) {
+    if (!remoteConfigured()) return Promise.resolve(catalog);
     if (catalogPromise && !force) return catalogPromise;
     catalogPromise = request('/api/reference/catalog').then(applyCatalog);
     return catalogPromise;
   }
   function loadModels(force) {
+    if (!remoteConfigured()) return Promise.resolve(models);
     if (modelPromise && !force) return modelPromise;
     modelPromise = request('/api/reference/models').then(payload => {
       if (payload && payload.ok === true) models = { providers: safeArray(payload.providers), models: safeArray(payload.models), generatedAt: text(payload.generatedAt) };
@@ -89,6 +95,11 @@
   }
   function installModelListBridge() {
     if (!window.AI || typeof window.AI.listModels !== 'function' || window.AI.listModels.__fhRegistryBridge) return;
+    /* 静态发布模式由 ai.js 直接调用官方 /models；注册中心不能把它替换成后端请求。 */
+    if (window.AI.getConfig && window.AI.getConfig().localOnly) {
+      window.AI.modelRegistry = { load: loadModels, get: getModels };
+      return;
+    }
     const listModels = async function (profile) {
       const slug = text(profile && profile.provider);
       const result = await loadModels(true);

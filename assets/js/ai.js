@@ -1,17 +1,21 @@
 /* ================= 凤凰花·智学 AI 连接层 =================
  * 连接模型时采用 provider / base URL / wire protocol / model / credential
  * 五段式配置，兼容常见 AI harness 的连接方式：可保存多个 profile，选择
- * 服务端中转或浏览器直连，并支持 OpenAI Chat、OpenAI Responses、Anthropic Messages。
+ * 当前版本从浏览器直连官方 API，并支持 OpenAI Chat、OpenAI Responses、Anthropic Messages。
  */
 (function () {
   'use strict';
 
   const STORE_KEY = 'fh_ai_config_runtime';
-  let runtimeStore = { version: 3, activeProfileId: '', profiles: [], relayBase: '', style: 'warm' };
+  let runtimeStore = { version: 3, activeProfileId: '', profiles: [], style: 'warm' };
   const DEFAULT_PROVIDER = 'zhipu';
   const DEFAULT_MODEL = 'glm-4-flash-250414';
 
-  /* 具体厂家、接口地址和模型均由服务端官方目录注入；这里只保留自定义接口兜底。 */
+  /*
+   * 浏览器本地模式的厂商预置。
+   * 这里仅保存连接入口和协议，不把容易过期的模型名称、价格写死；
+   * 模型目录由用户在 AI 中心使用自己的 Key 直接从官方接口读取。
+   */
   const PROVIDERS = {
     zhipu: {
       name: '智谱AI（BigModel）', endpoint: 'https://open.bigmodel.cn/api/paas/v4', model: DEFAULT_MODEL,
@@ -24,16 +28,112 @@
         defaultPricing: { unit: 'CNY_per_token', currency: 'CNY', prompt: 0, completion: 0, source: 'official_pricing_page' }
       }
     },
+    openai: {
+      name: 'OpenAI', endpoint: 'https://api.openai.com/v1', auth: 'bearer', protocol: 'openai-responses',
+      docsUrl: 'https://platform.openai.com/docs/quickstart', pricingUrl: 'https://openai.com/api/pricing/'
+    },
+    anthropic: {
+      name: 'Anthropic', endpoint: 'https://api.anthropic.com/v1', auth: 'x-api-key', protocol: 'anthropic-messages',
+      docsUrl: 'https://docs.anthropic.com/en/api/getting-started', pricingUrl: 'https://www.anthropic.com/pricing'
+    },
+    'google-ai-studio': {
+      name: 'Google AI Studio', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://ai.google.dev/gemini-api/docs/openai', pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing'
+    },
+    openrouter: {
+      name: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', auth: 'bearer', protocol: 'openai-chat', kind: 'aggregator',
+      docsUrl: 'https://openrouter.ai/docs/quickstart', pricingUrl: 'https://openrouter.ai/models'
+    },
+    deepseek: {
+      name: 'DeepSeek', endpoint: 'https://api.deepseek.com', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://api-docs.deepseek.com/', pricingUrl: 'https://api-docs.deepseek.com/quick_start/pricing'
+    },
+    moonshot: {
+      name: '月之暗面 Kimi', endpoint: 'https://api.moonshot.cn/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://platform.moonshot.cn/docs/intro', pricingUrl: 'https://platform.moonshot.cn/docs/pricing'
+    },
+    qwen: {
+      name: '阿里云百炼 / 通义千问', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://help.aliyun.com/zh/model-studio/developer-reference/compatibility-of-openai-with-dashscope', pricingUrl: 'https://help.aliyun.com/zh/model-studio/developer-reference/model-pricing'
+    },
+    'baidu-qianfan': {
+      name: '百度智能云千帆', endpoint: 'https://qianfan.baidubce.com/v2', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://cloud.baidu.com/doc/qianfan-api/s/Dmba8k71y', pricingUrl: 'https://cloud.baidu.com/doc/qianfan/s/Smoghsq3g'
+    },
+    minimax: {
+      name: 'MiniMax', endpoint: 'https://api.minimaxi.com/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://platform.minimaxi.com/document/简介', pricingUrl: 'https://platform.minimaxi.com/price'
+    },
+    volcengine: {
+      name: '火山引擎方舟 / 豆包', endpoint: 'https://ark.cn-beijing.volces.com/api/v3', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://www.volcengine.com/docs/82379/1399008', pricingUrl: 'https://www.volcengine.com/docs/82379/1330310'
+    },
+    siliconflow: {
+      name: '硅基流动', endpoint: 'https://api.siliconflow.cn/v1', auth: 'bearer', protocol: 'openai-chat', kind: 'aggregator',
+      docsUrl: 'https://docs.siliconflow.cn/', pricingUrl: 'https://siliconflow.cn/pricing'
+    },
+    baichuan: {
+      name: '百川智能', endpoint: 'https://api.baichuan-ai.com/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://platform.baichuan-ai.com/docs/api', pricingUrl: 'https://platform.baichuan-ai.com/price'
+    },
+    cohere: {
+      name: 'Cohere', endpoint: 'https://api.cohere.com/compatibility/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://docs.cohere.com/docs/openai-sdk-compatibility', pricingUrl: 'https://cohere.com/pricing'
+    },
+    groq: {
+      name: 'Groq', endpoint: 'https://api.groq.com/openai/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://console.groq.com/docs/quickstart', pricingUrl: 'https://groq.com/pricing/'
+    },
+    mistral: {
+      name: 'Mistral AI', endpoint: 'https://api.mistral.ai/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://docs.mistral.ai/api/', pricingUrl: 'https://mistral.ai/technology/#pricing'
+    },
+    xai: {
+      name: 'xAI', endpoint: 'https://api.x.ai/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://docs.x.ai/docs/overview', pricingUrl: 'https://docs.x.ai/docs/models'
+    },
+    together: {
+      name: 'Together AI', endpoint: 'https://api.together.xyz/v1', auth: 'bearer', protocol: 'openai-chat', kind: 'aggregator',
+      docsUrl: 'https://docs.together.ai/docs/quickstart', pricingUrl: 'https://www.together.ai/pricing'
+    },
+    fireworks: {
+      name: 'Fireworks AI', endpoint: 'https://api.fireworks.ai/inference/v1', auth: 'bearer', protocol: 'openai-chat', kind: 'aggregator',
+      docsUrl: 'https://docs.fireworks.ai/getting-started/quickstart', pricingUrl: 'https://fireworks.ai/pricing'
+    },
+    perplexity: {
+      name: 'Perplexity', endpoint: 'https://api.perplexity.ai', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://docs.perplexity.ai/guides/getting-started', pricingUrl: 'https://docs.perplexity.ai/guides/pricing'
+    },
+    cerebras: {
+      name: 'Cerebras', endpoint: 'https://api.cerebras.ai/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://inference-docs.cerebras.ai/', pricingUrl: 'https://www.cerebras.ai/pricing'
+    },
+    sambanova: {
+      name: 'SambaNova Cloud', endpoint: 'https://api.sambanova.ai/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://docs.sambanova.ai/', pricingUrl: 'https://cloud.sambanova.ai/pricing'
+    },
+    nvidia: {
+      name: 'NVIDIA NIM', endpoint: 'https://integrate.api.nvidia.com/v1', auth: 'bearer', protocol: 'openai-chat',
+      docsUrl: 'https://docs.api.nvidia.com/nim/reference', pricingUrl: 'https://build.nvidia.com/explore/discover'
+    },
+    aihubmix: {
+      name: 'AIHubMix', endpoint: 'https://aihubmix.com/v1', auth: 'bearer', protocol: 'openai-chat', kind: 'aggregator',
+      docsUrl: 'https://doc.aihubmix.com/', pricingUrl: 'https://aihubmix.com/price'
+    },
+    'tencent-tokenhub': {
+      name: '腾讯云 TokenHub', endpoint: 'https://tokenhub.tencentmaas.com/v1', auth: 'bearer', protocol: 'openai-chat', kind: 'aggregator',
+      docsUrl: 'https://cloud.tencent.com/document/product/1823/130079', pricingUrl: 'https://cloud.tencent.com/document/product/1823/130051'
+    },
     custom: {
       name: '自定义接口', endpoint: '', model: '', auth: 'optional', protocol: 'openai-chat',
       keyHint: '填写服务商官方 Base URL、模型 ID 和 API Key。'
     }
   };
 
-  /* 模型名称、价格和可用状态不再写死；统一由服务端模型目录同步。 */
+  /* 模型名称、价格和可用状态不再写死；浏览器使用用户 Key 直接读取官方目录。 */
   const PAID_MODELS = [];
 
-  const CONFIG_VERSION = 2;
+  const CONFIG_VERSION = 3;
   const PROTOCOLS = {
     'openai-chat': { label: 'OpenAI Chat Completions', suffix: '/chat/completions', family: 'openai' },
     'openai-responses': { label: 'OpenAI Responses', suffix: '/responses', family: 'openai' },
@@ -42,13 +142,42 @@
     'replicate-predictions': { label: 'Replicate Predictions', suffix: '/predictions', family: 'replicate' }
   };
   const ROUTES = {
-    auto: { label: '智能路由', desc: '优先服务端中转，失败时尝试浏览器直连' },
-    relay: { label: '服务端中转', desc: 'Key 只在服务端配置，适合网络端和团队共用' },
-    direct: { label: '浏览器直连', desc: '浏览器直接访问公网模型服务，需要服务商允许跨域' }
+    direct: { label: '本地浏览器直连', desc: '当前页面直接访问官方 API，Key 只保存在本机' }
   };
 
   function nowIso() { return new Date().toISOString(); }
   function makeId(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function loadRuntimeStore() {
+    try {
+      const raw = window.localStorage && window.localStorage.getItem(STORE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.profiles)) runtimeStore = Object.assign({}, runtimeStore, parsed);
+      }
+      /* 兼容上一版连接中心单独保存的 Key，避免升级后让用户重新录入。 */
+      const legacyRaw = window.localStorage && window.localStorage.getItem('fh_ai_connection_secrets_v1');
+      if (legacyRaw && Array.isArray(runtimeStore.profiles)) {
+        const legacy = JSON.parse(legacyRaw);
+        if (legacy && typeof legacy === 'object') {
+          let migrated = false;
+          runtimeStore.profiles = runtimeStore.profiles.map(profile => {
+            const legacyKey = legacy[profile.id];
+            if (!profile.apiKey && typeof legacyKey === 'string' && legacyKey.trim()) {
+              migrated = true;
+              return Object.assign({}, profile, { apiKey: legacyKey.trim() });
+            }
+            return profile;
+          });
+          if (migrated) persistRuntimeStore();
+        }
+      }
+    } catch (e) {}
+  }
+  function persistRuntimeStore() {
+    try {
+      if (window.localStorage) window.localStorage.setItem(STORE_KEY, JSON.stringify(runtimeStore));
+    } catch (e) {}
+  }
   function providerOf(id) {
     const key = String(id || '');
     const catalog = window.FH_REFERENCE_DATA && typeof window.FH_REFERENCE_DATA.getModels === 'function' ? window.FH_REFERENCE_DATA.getModels() : null;
@@ -77,7 +206,7 @@
     return 'openai-chat';
   }
   function stripEndpoint(endpoint) {
-    return String(endpoint || '').trim().replace(/\/(?:chat\/completions|responses|messages)\/?$/i, '').replace(/\/+$/, '');
+    return String(endpoint || '').trim().replace(/\/(?:chat\/completions|responses|messages|models)\/?$/i, '').replace(/\/+$/, '');
   }
   function endpointFor(profile) {
     const protocol = PROTOCOLS[profile.protocol] ? profile.protocol : 'openai-chat';
@@ -95,7 +224,7 @@
       baseUrl: stripEndpoint(p.endpoint),
       model: p.model || '',
       protocol: p.protocol || inferProtocol(p.endpoint),
-      mode: 'auto',
+      mode: 'direct',
       headers: '',
       apiKey: ''
     });
@@ -104,7 +233,8 @@
     const src = input || {};
     const provider = String(src.provider || src.providerId || 'custom');
     const p = providerOf(provider);
-    const protocol = PROTOCOLS[src.protocol] ? src.protocol : (p.protocol || inferProtocol(src.endpoint, src.protocol));
+    const providerProtocol = PROTOCOLS[p.protocol] ? p.protocol : 'openai-chat';
+    const protocol = PROTOCOLS[src.protocol] ? src.protocol : (providerProtocol || inferProtocol(src.endpoint, src.protocol));
     const baseUrl = stripEndpoint(src.baseUrl || src.endpoint || p.endpoint);
     return {
       id: String(src.id || makeId('profile')),
@@ -114,7 +244,7 @@
       model: String(src.model || p.model || '').trim().slice(0, 180),
       protocol: protocol,
       endpointPath: String(src.endpointPath || p.endpointPath || '').trim().slice(0, 180),
-      mode: ROUTES[src.mode] ? src.mode : 'auto',
+      mode: ROUTES[src.mode] ? src.mode : 'direct',
       headers: typeof src.headers === 'string' ? src.headers.slice(0, 4000) : '',
       /* Key 只保存在当前设备的 localStorage profile 中，并且永远不出现在 publicProfile、日志或导出数据里。 */
       apiKey: String(src.apiKey || '').trim().slice(0, 1000),
@@ -136,6 +266,7 @@
     const next = Object.assign({ version: CONFIG_VERSION }, store, { version: CONFIG_VERSION });
     next.profiles = (next.profiles || []).map(profile => normalizeProfile(profile));
     runtimeStore = next;
+    persistRuntimeStore();
     return runtimeStore;
   }
   function publicProfile(profile) {
@@ -145,7 +276,7 @@
     p.endpoint = endpointFor(profile || {});
     p.providerName = providerOf(p.provider).name;
     p.protocolLabel = (PROTOCOLS[p.protocol] || PROTOCOLS['openai-chat']).label;
-    p.modeLabel = (ROUTES[p.mode] || ROUTES.auto).label;
+    p.modeLabel = (ROUTES[p.mode] || ROUTES.direct).label;
     return p;
   }
   function activeProfile(includeSecret) {
@@ -164,7 +295,7 @@
       provider: active ? active.provider : '',
       model: active ? active.model : '',
       endpoint: active ? endpointFor(active) : '',
-      relayBase: store.relayBase || ''
+      localOnly: true
     });
   }
   function getProfiles() { return readStore().profiles.map(publicProfile); }
@@ -226,12 +357,12 @@
   }
 
   function isConfigured() {
-    return !!(window.__FH_AI_STATUS__ && window.__FH_AI_STATUS__.configured);
+    const profile = activeProfile(true);
+    return !!(profile && profile.model && endpointFor(profile) && profile.apiKey);
   }
 
   function providerLabel() {
     const p = activeProfile(true);
-    if (window.__FH_AI_STATUS__ && window.__FH_AI_STATUS__.configured) return '学校 AI 服务';
     if (p && p.model && endpointFor(p) && (p.apiKey || providerOf(p.provider).auth === 'none' || providerOf(p.provider).auth === 'optional')) {
       return (providerOf(p.provider).name || 'AI 连接') + ' · ' + p.model;
     }
@@ -239,8 +370,6 @@
   }
 
   /* ---------- 通用对话 ---------- */
-  let relayOk = null;
-  let relayOkAt = 0;
   function profileWithSecret(input) {
     const src = input || {};
     const existing = src.id ? getProfile(src.id, true) : activeProfile(true);
@@ -289,38 +418,10 @@
     const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     return Array.isArray(content) ? content.map(item => item && (item.text || item.content) || '').join('').trim() : String(content || '').trim();
   }
-  function relayUrl(path) {
-    const cfg = getConfig() || {};
-    if (cfg.relayBase) return String(cfg.relayBase).replace(/\/$/, '') + path;
-    return window.FHNetwork && window.FHNetwork.url ? window.FHNetwork.url(path) : path;
-  }
-  function relayHeaders(extra) {
-    const base = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
-    return window.FHNetwork && window.FHNetwork.headers ? window.FHNetwork.headers(base) : base;
-  }
-  async function relayAvailable(force) {
-    // 带 5 秒 TTL 的缓存，避免每次 AI 请求都额外探测网络。
-    if (force) relayOk = null;
-    if (relayOk !== null && Date.now() - relayOkAt < 5000) return relayOk;
-    try {
-      const r = await fetch(relayUrl('/api/ping'), { method: 'GET' });
-      relayOk = r.ok;
-    } catch (e) { relayOk = false; }
-    relayOkAt = Date.now();
-    return relayOk;
-  }
-
-  async function relayStatus() {
-    try {
-      const r = await fetch(relayUrl('/api/ai/status'), { headers: relayHeaders() });
-      const data = r.ok ? await r.json() : {};
-      return Object.assign({ ok: r.ok, configured: false }, data, { route: 'relay' });
-    } catch (e) { return { ok: false, configured: false, network: false, route: 'relay' }; }
-  }
-
   async function serverStatus() {
-    const relay = await relayStatus();
-    return Object.assign(relay, { direct: false, route: 'relay' });
+    const profile = activeProfile(true);
+    const configured = !!(profile && profile.model && endpointFor(profile) && profile.apiKey);
+    return { ok: configured, configured, direct: true, route: 'local', model: profile && profile.model || '', message: configured ? '本地浏览器连接已配置' : '当前版本使用本地浏览器直连，请先配置连接' };
   }
 
   async function directRequest(profile, messages, opts) {
@@ -349,73 +450,56 @@
     } finally { clearTimeout(timer); }
   }
 
-  /* 请求模型：优先按当前 profile 走服务端中转；服务端不可用且用户明确选择直连时才直连。 */
+  /* 当前交付为无后端版本：AI 请求只从浏览器直连官方 API。 */
   async function chat(messages, opts) {
     opts = opts || {};
     const profile = profileWithSecret(opts.profile || null);
     const timeout = opts.timeout || 45000;
     const temperature = opts.temperature != null ? opts.temperature : 0.7;
     const maxTokens = opts.maxTokens || 1400;
-    const mode = profile.mode || 'auto';
-    if (mode !== 'direct' && await relayAvailable()) {
-      const rctl = new AbortController();
-      const rtimer = setTimeout(() => rctl.abort(), Math.max(timeout, 90000));
-      try {
-        const res = await fetch(relayUrl('/api/ai/chat'), {
-          method: 'POST', headers: relayHeaders(),
-          body: JSON.stringify({
-            messages: messages, temperature: temperature, maxTokens: maxTokens,
-            connection: {
-              provider: profile.provider, protocol: profile.protocol, baseUrl: profile.baseUrl,
-              model: profile.model, apiKey: profile.apiKey, headers: profile.headers
-            }
-          }),
-          signal: rctl.signal
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data || !data.ok) {
-          const err = new Error((data && data.msg) || ('模型服务异常（HTTP ' + res.status + '）'));
-          err.code = data && data.code; err.status = res.status; err.retryable = !!(data && data.retryable); throw err;
-        }
-        return String(data.content || '').trim();
-      } catch (e) {
-        if (e && e.name === 'AbortError') throw new Error('服务端中转超时，请稍后重试或切换连接方式');
-        throw e;
-      } finally { clearTimeout(rtimer); }
-    }
-    if (mode === 'direct' || (mode === 'auto' && canUseDirect(profile))) return directRequest(profile, messages, { timeout, maxTokens, temperature });
+    if (canUseDirect(profile)) return directRequest(profile, messages, { timeout, maxTokens, temperature });
     throw new Error('当前 AI 连接不可用，请检查模型、接口地址和 API Key');
   }
 
   async function testProfile(input) {
     const profile = profileWithSecret(input || {});
     const probe = [{ role: 'system', content: '只回复两个字：正常' }, { role: 'user', content: '连接测试' }];
-    if (profile.mode !== 'direct') {
-      const relay = await relayStatus();
-      if (relay.ok && relay.configured) return { ok: true, route: 'relay', model: relay.model || profile.model, message: '服务端中转已连接，模型服务可用' };
-      if (profile.mode === 'relay') return { ok: false, route: 'relay', message: relay.ok ? '服务已连接，但服务端尚未配置模型' : '无法连接服务端中转' };
-    }
     if (!canUseDirect(profile)) return { ok: false, route: 'direct', message: '请补充公网 base URL、模型名称和 API Key' };
     try {
       await directRequest(profile, probe, { timeout: 20000, maxTokens: 20, temperature: 0 });
       return { ok: true, route: 'direct', model: profile.model, message: '浏览器直连测试通过' };
-    } catch (e) { return { ok: false, route: 'direct', model: profile.model, message: String((e && e.message) || '浏览器直连失败') }; }
+    } catch (e) {
+      const message = e && e.name === 'TypeError'
+        ? '浏览器无法访问该接口，通常是服务商未允许跨域；请改用官方兼容接口或配置可跨域的网关。'
+        : String((e && e.message) || '浏览器直连失败');
+      return { ok: false, route: 'direct', model: profile.model, message: message };
+    }
   }
 
   async function listModels(input) {
     const profile = profileWithSecret(input || {});
     if (profile.protocol === 'anthropic-messages') return { ok: false, models: [], message: 'Anthropic Messages 不提供通用模型列表，请手动填写模型 ID' };
-    if (!canUseDirect(profile)) return { ok: false, models: [], message: '请先填写可用的 base URL、模型和 Key' };
+    const baseUrl = stripEndpoint(profile.baseUrl || profile.endpoint);
+    if (!/^https:\/\//i.test(baseUrl) || !profile.apiKey) return { ok: false, models: [], message: '请先填写可用的 base URL 和 API Key；读取模型目录不要求先选择模型' };
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 12000);
     try {
-      const base = stripEndpoint(profile.baseUrl || profile.endpoint);
-      const res = await fetch(base + '/models', { headers: authHeaders(profile), signal: ctl.signal });
+      const res = await fetch(baseUrl + '/models', { headers: authHeaders(profile), signal: ctl.signal });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data.error && data.error.message) || ('模型列表返回 HTTP ' + res.status));
       const raw = Array.isArray(data) ? data : (Array.isArray(data.data) ? data.data : (Array.isArray(data.models) ? data.models : []));
-      return { ok: true, models: raw.map(item => ({ id: String(item.id || item.name || ''), name: String(item.name || item.id || '') })).filter(item => item.id).slice(0, 200), message: '模型列表已更新' };
-    } catch (e) { return { ok: false, models: [], message: e && e.name === 'AbortError' ? '读取模型列表超时' : String((e && e.message) || '读取模型列表失败') }; }
+      return { ok: true, models: raw.map(item => ({
+        id: String(item.id || item.name || ''), name: String(item.name || item.id || ''),
+        type: String(item.model_type || item.type || ''), pricing: item.pricing || null,
+        contextLength: Number(item.context_length || item.contextLength || 0) || null,
+        capabilities: item.capabilities || item.supported_parameters || []
+      })).filter(item => item.id).slice(0, 500), message: '模型列表已从官方接口更新' };
+    } catch (e) {
+      const message = e && e.name === 'AbortError' ? '读取模型列表超时，请检查网络状态。' : e && e.name === 'TypeError'
+        ? '浏览器无法读取该厂商的模型列表，可能是跨域限制；可以手动填写模型 ID。'
+        : String((e && e.message) || '读取模型列表失败');
+      return { ok: false, models: [], message: message };
+    }
     finally { clearTimeout(timer); }
   }
 
@@ -1268,6 +1352,7 @@
     return raw;
   }
 
+  loadRuntimeStore();
   ensureDefaultProfile();
 
   window.AI = {
@@ -1287,7 +1372,6 @@
     setConfig: setConfig,
     isConfigured: isConfigured,
     providerLabel: providerLabel,
-    relayAvailable: relayAvailable,
     serverStatus: serverStatus,
     testProfile: testProfile,
     listModels: listModels,
