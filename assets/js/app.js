@@ -1654,6 +1654,12 @@
   state.paper.mode = state.paper.mode || 'free';
   state.paper.preset = state.paper.preset || '';
   state.paper.exportVer = state.paper.exportVer || 'teacher';
+  state.paper.stage = state.paper.stage || 'setup';
+  state.paper.goal = state.paper.goal || 'unit';
+  state.paper.targetClass = state.paper.targetClass || '';
+  state.paper.releaseMode = state.paper.releaseMode || 'manual';
+  state.paper.blueprint = Array.isArray(state.paper.blueprint) ? state.paper.blueprint : [];
+  state.paper.bankFilter = state.paper.bankFilter || { q: '', type: '全部题型', diff: '全部难度', source: '全部来源' };
   state.paper.generating = false;
 
   /* ---------- 试卷草稿持久化：切换页面 / 刷新均不丢失 ---------- */
@@ -1668,6 +1674,12 @@
         mode: p.mode,
         preset: p.preset,
         exportVer: p.exportVer,
+        stage: p.stage,
+        goal: p.goal,
+        targetClass: p.targetClass,
+        releaseMode: p.releaseMode,
+        blueprint: p.blueprint,
+        bankFilter: p.bankFilter,
         checked: Array.from(p.checked || []),
         readingPick: p.readingPick || null
       }));
@@ -1685,6 +1697,12 @@
       if (d.mode) state.paper.mode = d.mode;
       if (d.preset) state.paper.preset = d.preset;
       if (d.exportVer) state.paper.exportVer = d.exportVer;
+      if (d.stage) state.paper.stage = d.stage;
+      if (d.goal) state.paper.goal = d.goal;
+      if (d.targetClass) state.paper.targetClass = d.targetClass;
+      if (d.releaseMode) state.paper.releaseMode = d.releaseMode;
+      if (Array.isArray(d.blueprint)) state.paper.blueprint = d.blueprint;
+      if (d.bankFilter) state.paper.bankFilter = Object.assign(state.paper.bankFilter, d.bankFilter);
       if (Array.isArray(d.checked)) d.checked.forEach(k => state.paper.checked.add(k));
       state.paper.readingPick = d.readingPick || null;
       const maxId = d.questions.reduce((m, q) => Math.max(m, q.id || 0), 0);
@@ -1993,7 +2011,7 @@
     refresh();
   }
 
-  function renderPaper() {
+  function renderPaperLegacy() {
     state.paper.tab = state.query.tab === 'graph' ? 'graph' : 'chapter';
     const tree = state.paper.tab === 'graph' ? graphTree() : chapterTree();
     const info = paperCtxInfo();
@@ -2339,6 +2357,378 @@
     savePaperDraft();
   }
 
+  /* ---------- 新版组卷工作台：方案 → 蓝图 → 题库 → 检查发布 ---------- */
+  const PAPER_STAGES = [
+    { id: 'setup', label: '方案', hint: '范围与目标' },
+    { id: 'blueprint', label: '蓝图', hint: '题型与配比' },
+    { id: 'bank', label: '题库', hint: '候选题与筛选' },
+    { id: 'review', label: '检查发布', hint: '质量与投放' }
+  ];
+  const PAPER_TYPES = ['选择题', '判断题', '填空题', '多选题', '阅读题', '解答题'];
+
+  function paperTargetClasses() {
+    const list = (scopedClasses() || []).filter(c => c && c.name);
+    if (!list.length && state.user && state.user.cls) {
+      list.push({ id: 'self-class', name: state.user.cls, grade: state.user.grade || '', schoolId: currentSchoolId() });
+    }
+    return list;
+  }
+
+  function paperTargetName() {
+    const cls = paperTargetClasses().find(c => String(c.id) === String(state.paper.targetClass));
+    return cls ? cls.name : (state.paper.targetClass || (state.user && state.user.cls) || '暂不指定班级');
+  }
+
+  function paperBlueprintDefaults() {
+    const info = paperCtxInfo();
+    const presets = M.PAPER_PRESETS[info.ctx.subject] || [];
+    const preset = presets.find(p => p.id === state.paper.preset) || presets[0];
+    if (preset && !state.paper.preset) state.paper.preset = preset.id;
+    return (preset && preset.sections ? preset.sections : [
+      { type: '选择题', count: 8, points: 3, diff: { 易: 0.5, 中: 0.35, 难: 0.15 } },
+      { type: '填空题', count: 5, points: 4, diff: { 易: 0.4, 中: 0.4, 难: 0.2 } },
+      { type: '解答题', count: 3, points: 8, diff: { 易: 0.2, 中: 0.5, 难: 0.3 } }
+    ]).map((sec, i) => {
+      const points = Array.isArray(sec.points)
+        ? Math.max(1, Math.round(sec.points.reduce((sum, n) => sum + Number(n || 0), 0) / sec.points.length))
+        : Math.max(1, Number(sec.points || 1));
+      const mix = sec.diff || { 易: 0.4, 中: 0.4, 难: 0.2 };
+      const diff = ['易', '中', '难'].sort((a, b) => Number(mix[b] || 0) - Number(mix[a] || 0))[0] || '中';
+      return { id: 'bp_' + i + '_' + Date.now(), type: sec.type, count: Number(sec.count || 1), points: points, diff: diff, mix: mix };
+    });
+  }
+
+  function ensurePaperBlueprint() {
+    if (!Array.isArray(state.paper.blueprint) || !state.paper.blueprint.length) state.paper.blueprint = paperBlueprintDefaults();
+    return state.paper.blueprint;
+  }
+
+  function paperBlueprintStats(rows) {
+    const list = rows || ensurePaperBlueprint();
+    const count = list.reduce((sum, row) => sum + Math.max(0, Number(row.count || 0)), 0);
+    const score = list.reduce((sum, row) => sum + Math.max(0, Number(row.count || 0)) * Math.max(0, Number(row.points || 0)), 0);
+    const preset = (M.PAPER_PRESETS[paperCtxInfo().ctx.subject] || []).find(p => p.id === state.paper.preset);
+    return { count: count, score: score, time: preset ? preset.time : Math.max(30, Math.round(count * 2.5)) };
+  }
+
+  function paperQuality() {
+    const questions = state.paper.questions || [];
+    const keys = new Set();
+    let duplicates = 0;
+    questions.forEach(q => {
+      const key = window.AI && window.AI.stemKey ? window.AI.stemKey(q) : String(q.stem || '').replace(/\s+/g, '').slice(0, 100);
+      if (key && keys.has(key)) duplicates += 1;
+      if (key) keys.add(key);
+    });
+    const answerMissing = questions.filter(q => q.type !== '资料' && !String(q.answer || '').trim()).length;
+    const explainMissing = questions.filter(q => q.type !== '资料' && !String(q.explain || q.process || '').trim()).length;
+    const unchecked = questions.filter(q => q.type !== '资料' && !q.checked).length;
+    const expected = ensurePaperBlueprint().reduce((map, row) => {
+      map[row.type] = (map[row.type] || 0) + Number(row.count || 0);
+      return map;
+    }, {});
+    const actual = questions.reduce((map, q) => {
+      map[q.type] = (map[q.type] || 0) + 1;
+      return map;
+    }, {});
+    const gaps = Object.keys(expected).reduce((sum, type) => sum + Math.max(0, expected[type] - (actual[type] || 0)), 0);
+    return { total: questions.length, duplicates: duplicates, answerMissing: answerMissing, explainMissing: explainMissing, unchecked: unchecked, gaps: gaps };
+  }
+
+  function paperFilteredQuestions() {
+    const f = state.paper.bankFilter || {};
+    const query = String(f.q || '').trim().toLowerCase();
+    return (state.paper.questions || []).filter(q => {
+      const hay = [q.stem, q.kp, q.source, q.type].join(' ').toLowerCase();
+      return (!query || hay.includes(query)) && (!f.type || f.type === '全部题型' || q.type === f.type) &&
+        (!f.diff || f.diff === '全部难度' || q.diff === f.diff) && (!f.source || f.source === '全部来源' || q.source === f.source);
+    });
+  }
+
+  function paperContextSelects() {
+    const ctx = state.paper.ctx;
+    const subjectOptions = Object.keys(M.TEXTBOOKS).map(k => '<option value="' + k + '"' + (ctx.subject === k ? ' selected' : '') + '>' + esc(M.TEXTBOOKS[k].name) + '</option>').join('');
+    const gradeOptions = GRADE_TEXT.slice(1).map((g, i) => '<option value="' + (i + 1) + '"' + (Number(ctx.grade) === i + 1 ? ' selected' : '') + '>' + g + '年级</option>').join('');
+    const subj = M.TEXTBOOKS[ctx.subject] || { versions: [] };
+    const versions = subj.versions || [];
+    const ver = versions.find(v => v.id === ctx.version) || versions[0];
+    const book = ver && ver.books && ver.books[Number(ctx.grade)];
+    const terms = book ? Object.keys(book) : ['上', '下'];
+    if (!terms.includes(ctx.term)) state.paper.ctx.term = terms[0];
+    if (!versions.some(v => v.id === ctx.version) && versions[0]) state.paper.ctx.version = versions[0].id;
+    return '<select class="select" id="p2-subject" aria-label="学科">' + subjectOptions + '</select>' +
+      '<select class="select" id="p2-grade" aria-label="年级">' + gradeOptions + '</select>' +
+      '<select class="select" id="p2-term" aria-label="学期">' + terms.map(t => '<option value="' + esc(t) + '"' + (state.paper.ctx.term === t ? ' selected' : '') + '>' + (t === '全' ? '全一册' : t + '册') + '</option>').join('') + '</select>' +
+      '<select class="select" id="p2-version" aria-label="教材版本">' + versions.map(v => '<option value="' + esc(v.id) + '"' + (state.paper.ctx.version === v.id ? ' selected' : '') + '>' + esc(v.name) + (v.default ? ' · 推荐' : '') + '</option>').join('') + '</select>';
+  }
+
+  function paperScopeHtml(compact) {
+    const selected = Array.from(state.paper.checked || []);
+    const options = curriculumKpOptions(paperCtxInfo().ctx.subject);
+    const chips = selected.length
+      ? selected.map(kp => '<button class="paper-kp-chip" type="button" data-paper-kp-remove="' + esc(kp) + '">' + esc(kp) + '<span aria-hidden="true">×</span></button>').join('')
+      : '<span class="paper-scope-empty">还没有知识点，先加入本次测评范围</span>';
+    const suggestions = options.filter(kp => !state.paper.checked.has(kp)).slice(0, compact ? 4 : 6);
+    return '<div class="paper-scope' + (compact ? ' is-compact' : '') + '">' +
+      '<div class="paper-v2-cardhead"><div><span class="paper-eyebrow">知识范围</span><h2>' + selected.length + ' 个知识点</h2></div><span class="tag tag-blue">' + esc(paperCtxInfo().subjectText) + ' · ' + esc(paperCtxInfo().gradeText) + '</span></div>' +
+      '<div class="paper-kp-list" id="paper-kp-list">' + chips + '</div>' +
+      '<div class="paper-kp-add"><input class="input" id="paper-kp-input" list="paper-kp-options" aria-label="添加知识点" placeholder="输入知识点后回车" /><datalist id="paper-kp-options">' + options.map(kp => '<option value="' + esc(kp) + '"></option>').join('') + '</datalist><button class="btn btn-outline" type="button" id="paper-kp-add">加入范围</button></div>' +
+      (suggestions.length ? '<div class="paper-suggestions"><span>建议：</span>' + suggestions.map(kp => '<button type="button" class="link-button" data-paper-kp-suggest="' + esc(kp) + '">' + esc(kp) + '</button>').join('') + '</div>' : '') +
+      '</div>';
+  }
+
+  function paperSummaryHtml() {
+    const stats = paperBlueprintStats();
+    const quality = paperQuality();
+    const target = paperTargetName();
+    return '<aside class="paper-v2__aside"><div class="paper-v2-card paper-v2-sticky"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">本次测评</span><h2>' + esc(state.paper.name || '未命名试卷') + '</h2></div><span class="tag ' + (quality.total ? 'tag-green' : 'tag-gray') + '">' + (quality.total ? quality.total + ' 题' : '草稿') + '</span></div>' +
+      '<div class="paper-summary-stats"><div><b id="p-count">' + quality.total + '</b><span>题量</span></div><div><b id="p-total">' + (quality.total ? paperTotal() : stats.score) + '</b><span>总分</span></div><div><b id="p-exam">' + (quality.total ? paperTimes().exam : stats.time) + '</b><span>分钟</span></div></div>' +
+      '<div class="paper-summary-line"><span>投放班级</span><b>' + esc(target) + '</b></div>' +
+      '<div class="paper-summary-line"><span>蓝图目标</span><b>' + stats.count + ' 题 · ' + stats.score + ' 分</b></div>' +
+      '<div class="paper-summary-kps"><span>知识范围</span><div>' + (state.paper.checked.size ? Array.from(state.paper.checked).slice(0, 5).map(kp => '<span class="tag tag-gray">' + esc(kp) + '</span>').join('') + (state.paper.checked.size > 5 ? '<span class="tag tag-gray">+' + (state.paper.checked.size - 5) + '</span>' : '') : '<span class="form-hint">待选择</span>') + '</div></div>' +
+      '</div></aside>';
+  }
+
+  function paperBlueprintRowsHtml() {
+    const rows = ensurePaperBlueprint();
+    return rows.map((row, i) => '<div class="blueprint-row" data-blueprint-row="' + i + '">' +
+      '<select class="select" data-blueprint="type" aria-label="第 ' + (i + 1) + ' 行题型">' + PAPER_TYPES.map(type => '<option value="' + type + '"' + (row.type === type ? ' selected' : '') + '>' + type + '</option>').join('') + '</select>' +
+      '<input class="input" type="number" min="1" max="50" data-blueprint="count" aria-label="第 ' + (i + 1) + ' 行题量" value="' + Number(row.count || 1) + '">' +
+      '<input class="input" type="number" min="1" max="50" data-blueprint="points" aria-label="第 ' + (i + 1) + ' 行每题分值" value="' + Number(row.points || 1) + '">' +
+      '<select class="select" data-blueprint="diff" aria-label="第 ' + (i + 1) + ' 行难度"><option' + (row.diff === '易' ? ' selected' : '') + '>易</option><option' + (row.diff === '中' ? ' selected' : '') + '>中</option><option' + (row.diff === '难' ? ' selected' : '') + '>难</option></select>' +
+      '<button class="icon-btn" type="button" data-blueprint-remove="' + i + '" aria-label="删除第 ' + (i + 1) + ' 行">×</button></div>').join('');
+  }
+
+  function paperQualityHtml() {
+    const q = paperQuality();
+    const items = [
+      { label: '题量与蓝图匹配', value: q.gaps ? '缺 ' + q.gaps + ' 题' : '已匹配', ok: !q.gaps && q.total > 0 },
+      { label: '重复题检查', value: q.total ? (q.duplicates ? q.duplicates + ' 道重复' : '未发现重复') : '暂无题目', ok: !q.duplicates && q.total > 0 },
+      { label: '答案完整度', value: q.total ? (q.answerMissing ? q.answerMissing + ' 道缺答案' : '完整') : '待生成', ok: !q.answerMissing && q.total > 0 },
+      { label: '教师复核', value: q.total ? (q.unchecked ? q.unchecked + ' 道待复核' : '全部已复核') : '待生成', ok: !q.unchecked && q.total > 0 }
+    ];
+    return '<div class="quality-list">' + items.map(item => '<div class="quality-item ' + (item.ok ? 'is-ok' : 'is-warn') + '"><span class="quality-icon">' + (item.ok ? '✓' : '!') + '</span><span>' + item.label + '</span><b>' + item.value + '</b></div>').join('') + '</div>';
+  }
+
+  function paperStageSetup(info) {
+    const goals = [
+      { id: 'unit', label: '单元掌握', desc: '覆盖核心知识点' },
+      { id: 'weekly', label: '周测巩固', desc: '短练习，快反馈' },
+      { id: 'exam', label: '阶段测评', desc: '完整结构与区分度' },
+      { id: 'personal', label: '个性化补弱', desc: '围绕薄弱点配题' }
+    ];
+    const classes = paperTargetClasses();
+    const presetOptions = (M.PAPER_PRESETS[info.ctx.subject] || []).map(p => '<option value="' + esc(p.id) + '"' + (state.paper.preset === p.id ? ' selected' : '') + '>' + esc(p.name) + ' · ' + esc(p.region) + '</option>').join('');
+    return '<div class="paper-v2__main"><section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 01</span><h2>先定义这份卷子</h2></div><span class="tag tag-gray">自动保存</span></div>' +
+      '<div class="paper-field-grid">' + paperContextSelects() + '</div>' +
+      '<div class="paper-v2-field"><label>测评目标</label><div class="paper-goal-grid">' + goals.map(g => '<button type="button" class="paper-goal' + (state.paper.goal === g.id ? ' is-active' : '') + '" data-paper-goal="' + g.id + '"><b>' + g.label + '</b><span>' + g.desc + '</span></button>').join('') + '</div></div>' +
+      '<div class="paper-v2-field"><label for="paper-target">投放班级</label><select class="select" id="paper-target"><option value="">暂不指定班级</option>' + classes.map(c => '<option value="' + esc(c.id) + '"' + (String(state.paper.targetClass) === String(c.id) ? ' selected' : '') + '>' + esc(c.name) + (c.grade ? ' · ' + esc(c.grade) : '') + '</option>').join('') + '</select></div>' +
+      '<div class="paper-v2-field"><label for="paper-preset">起始结构</label><select class="select" id="paper-preset"><option value="">自定义蓝图</option>' + presetOptions + '</select></div></section>' +
+      paperScopeHtml(false) +
+      '<div class="paper-v2-actions"><span class="form-hint">范围、配比和题目都可以在后续步骤调整。</span><button class="btn btn-primary" type="button" data-paper-next="blueprint">下一步：生成蓝图 ' + icon('arrow', 15) + '</button></div></div>';
+  }
+
+  function paperStageBlueprint() {
+    const stats = paperBlueprintStats();
+    const presets = M.PAPER_PRESETS[paperCtxInfo().ctx.subject] || [];
+    return '<div class="paper-v2__main"><section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 02</span><h2>搭建组卷蓝图</h2></div><div class="paper-inline-actions"><button class="btn btn-ghost btn-sm" type="button" id="paper-blueprint-auto">套用推荐配比</button><button class="btn btn-outline btn-sm" type="button" id="paper-blueprint-add">增加题型</button></div></div>' +
+      '<div class="blueprint-labels"><span>题型</span><span>题数</span><span>分值</span><span>难度</span><i></i></div><div id="paper-blueprint-rows">' + paperBlueprintRowsHtml() + '</div>' +
+      '<div class="blueprint-total"><span>预计 ' + stats.count + ' 题 · ' + stats.score + ' 分 · ' + stats.time + ' 分钟</span><span>难度可在题库阶段继续筛选</span></div></section>' +
+      '<section class="paper-v2-card paper-scope-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">范围确认</span><h2>本卷覆盖</h2></div><button class="link-button" type="button" data-paper-back="setup">更换知识范围</button></div><div class="paper-kp-list">' + (state.paper.checked.size ? Array.from(state.paper.checked).map(kp => '<span class="paper-kp-chip is-static">' + esc(kp) + '</span>').join('') : '<span class="paper-scope-empty">尚未选择知识点</span>') + '</div></section>' +
+      '<div class="paper-v2-actions"><button class="btn btn-ghost" type="button" data-paper-back="setup">' + icon('arrow-left', 15) + '返回方案</button><button class="btn btn-primary" type="button" data-paper-next="bank">进入题库 ' + icon('arrow', 15) + '</button></div></div>';
+  }
+
+  function paperStageBank() {
+    const filtered = paperFilteredQuestions();
+    const sources = Array.from(new Set((state.paper.questions || []).map(q => q.source).filter(Boolean)));
+    return '<div class="paper-v2__main"><section class="paper-v2-card paper-bank-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 03</span><h2>题库候选区</h2></div><span class="tag tag-blue">已选 ' + (state.paper.questions || []).length + ' 题</span></div>' +
+      '<div class="paper-bank-toolbar"><div class="paper-bank-search"><span aria-hidden="true">⌕</span><input class="input" id="bank-q" value="' + esc(state.paper.bankFilter.q || '') + '" placeholder="搜索题干、知识点或来源" aria-label="搜索候选题"></div><select class="select" id="bank-type" aria-label="按题型筛选"><option>全部题型</option>' + PAPER_TYPES.map(t => '<option' + (state.paper.bankFilter.type === t ? ' selected' : '') + '>' + t + '</option>').join('') + '</select><select class="select" id="bank-diff" aria-label="按难度筛选"><option>全部难度</option><option' + (state.paper.bankFilter.diff === '易' ? ' selected' : '') + '>易</option><option' + (state.paper.bankFilter.diff === '中' ? ' selected' : '') + '>中</option><option' + (state.paper.bankFilter.diff === '难' ? ' selected' : '') + '>难</option></select><select class="select" id="bank-source" aria-label="按来源筛选"><option>全部来源</option>' + sources.map(s => '<option' + (state.paper.bankFilter.source === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + '</select><button class="btn btn-outline" type="button" id="paper-bank-apply">筛选</button></div>' +
+      '<div class="paper-generate-bar"><div><b>按蓝图补齐候选题</b><span>模型生成后进入候选区，先筛选再复核</span></div><div class="paper-generate-controls"><select class="select" id="q-type" aria-label="生成题型">' + PAPER_TYPES.map(t => '<option>' + t + '</option>').join('') + '</select><select class="select" id="q-diff" aria-label="生成难度"><option>全部难度</option><option>易</option><option>中</option><option>难</option></select><select class="select" id="q-num" aria-label="生成题量"><option>5 题</option><option>10 题</option><option>15 题</option><option>20 题</option></select><button class="btn btn-primary" type="button" id="ai-gen"' + (state.paper.generating ? ' disabled' : '') + '>' + icon('spark', 15) + (state.paper.generating ? '生成中…' : '生成候选题') + '</button><button class="btn btn-outline" type="button" id="gen-blueprint"' + (state.paper.generating ? ' disabled' : '') + '>按蓝图生成</button></div></div>' +
+      '<div id="gen-progress" class="gen-progress' + (state.paper.generating ? '' : ' hidden') + '"><div class="gp-bar"><div class="gp-fill" id="gp-fill" style="width:' + (state.paper.generating ? '15%' : '0%') + '"></div></div><span id="gp-text">' + (state.paper.generating ? '正在生成候选题…' : '') + '</span></div>' +
+      '<div class="paper-bank-meta"><span>显示 ' + filtered.length + ' / ' + (state.paper.questions || []).length + ' 题</span><span>拖动排序可在后续版本加入，当前按生成顺序组卷</span></div><div class="q-list paper-v2-q-list" id="q-list">' + (filtered.length ? filtered.map(questionCard).join('') : emptyQ()) + '</div></section>' +
+      '<div class="paper-v2-actions"><button class="btn btn-ghost" type="button" data-paper-back="blueprint">' + icon('arrow-left', 15) + '返回蓝图</button><button class="btn btn-primary" type="button" data-paper-next="review">检查与发布 ' + icon('arrow', 15) + '</button></div></div>';
+  }
+
+  function paperStageReview() {
+    const q = paperQuality();
+    const questions = state.paper.questions || [];
+    return '<div class="paper-v2__main"><section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">Step 04</span><h2>质量检查</h2></div><button class="btn btn-outline btn-sm" type="button" id="check-all"' + (questions.length ? '' : ' disabled') + '>一键标记已复核</button></div>' + paperQualityHtml() + '</section>' +
+      '<section class="paper-v2-card"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">发布设置</span><h2>把试卷交给谁</h2></div><span class="tag tag-gray">学生端只收到学生版</span></div><div class="paper-review-fields"><div class="paper-v2-field"><label for="paper-name">试卷名称</label><input class="input" id="paper-name" value="' + esc(state.paper.name || '') + '" placeholder="如：七年级数学 · 单元测评"></div><div class="paper-v2-field"><label for="export-ver">教师视图</label><select class="select" id="export-ver"><option value="teacher"' + (state.paper.exportVer !== 'student' ? ' selected' : '') + '>教师版：题目、答案与详解</option><option value="student"' + (state.paper.exportVer === 'student' ? ' selected' : '') + '>学生版：仅题目</option></select></div><div class="paper-v2-field"><label for="release-mode">成绩公布</label><select class="select" id="release-mode"><option value="manual"' + (state.paper.releaseMode === 'manual' ? ' selected' : '') + '>教师复核后公布</option><option value="immediate"' + (state.paper.releaseMode === 'immediate' ? ' selected' : '') + '>提交后立即公布</option></select></div><div class="paper-v2-field"><label>投放班级</label><div class="paper-readonly-field">' + esc(paperTargetName()) + '</div></div></div>' +
+      '<div class="paper-publish-actions"><button class="btn btn-outline" type="button" id="save-paper"' + (questions.length ? '' : ' disabled') + '>' + icon('mine', 15) + '保存草稿</button><button class="btn btn-outline" type="button" id="export-word"' + (questions.length ? '' : ' disabled') + '>' + icon('download', 15) + '导出 Word</button><button class="btn btn-outline" type="button" id="export-pdf"' + (questions.length ? '' : ' disabled') + '>导出 PDF</button><button class="btn btn-outline" type="button" id="export-gift"' + (questions.length ? '' : ' disabled') + '>导出 GIFT</button><button class="btn btn-primary" type="button" id="publish-paper"' + (state.paper.name && questions.length ? '' : ' disabled') + '>' + icon('publish', 15) + '发布到班级作业</button></div></section>' +
+      '<section class="paper-v2-card paper-review-list"><div class="paper-v2-cardhead"><div><span class="paper-eyebrow">逐题复核</span><h2>题目清单</h2></div><span class="form-hint">答案、详解和来源都可展开查看</span></div><div class="q-list" id="q-list">' + (questions.length ? questions.map(questionCard).join('') : emptyQ()) + '</div></section>' +
+      '<div class="paper-v2-actions"><button class="btn btn-ghost" type="button" data-paper-back="bank">' + icon('arrow-left', 15) + '返回题库</button><button class="btn btn-primary" type="button" id="publish-paper-bottom"' + (state.paper.name && questions.length ? '' : ' disabled') + '>' + icon('publish', 15) + '确认发布</button></div></div>';
+  }
+
+  async function generateBlueprintPaper() {
+    if (state.paper.generating) { showToast('正在生成中，请稍候', 'info'); return; }
+    if (!window.AI || !window.AI.isConfigured()) { showToast('请先在顶栏接入 AI 服务', 'error'); return; }
+    const kps = Array.from(state.paper.checked || []);
+    const rows = ensurePaperBlueprint().filter(row => Number(row.count || 0) > 0);
+    if (!kps.length) { showToast('请先完成知识范围', 'error'); state.paper.stage = 'setup'; renderPaper(); return; }
+    if (!rows.length) { showToast('蓝图至少需要一个题型', 'error'); return; }
+    const info = paperCtxInfo();
+    const generated = [];
+    state.paper.generating = true;
+    renderPaper();
+    showGenProgress(5, '正在按蓝图生成候选题…');
+    try {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        showGenProgress(8 + Math.round(i / rows.length * 82), '正在生成 ' + row.type + ' · ' + row.count + ' 题…');
+        const qs = await window.AI.generateSection({
+          knowledgePoints: kps, type: row.type, count: Number(row.count), points: Number(row.points),
+          mix: row.mix || { 易: row.diff === '易' ? 0.65 : 0.2, 中: row.diff === '中' ? 0.6 : 0.25, 难: row.diff === '难' ? 0.45 : 0.1 },
+          subjectKey: info.ctx.subject, grade: info.ctx.grade,
+          readingText: state.paper.readingPick ? state.paper.readingPick.text + '\n（来源：' + state.paper.readingPick.title + '）' : '',
+          subjectText: info.subjectText, gradeText: info.gradeText, versionText: info.versionText,
+          onProgress: (p, t) => showGenProgress(8 + Math.round(i / rows.length * 82) + Math.round(Number(p || 0) * 0.1), t)
+        });
+        const unique = dedupeQuestions(qs, (state.paper.questions || []).concat(generated));
+        unique.forEach(item => { item.section = row.type; item.points = Number(item.points || row.points); generated.push(item); });
+      }
+    } catch (err) {
+      state.paper.generating = false;
+      hideGenProgress();
+      renderPaper();
+      showToast('按蓝图生成失败：' + (err && err.message ? err.message : '请重试'), 'error');
+      return;
+    }
+    generated.forEach(item => { item.id = ++qid; item.checked = false; });
+    state.paper.questions = (state.paper.questions || []).concat(generated);
+    renumber();
+    state.paper.stage = 'bank';
+    state.paper.generating = false;
+    savePaperDraft();
+    renderPaper();
+    showToast('已生成 ' + generated.length + ' 道候选题，请筛选并逐题复核', 'success');
+  }
+
+  function paperRecord(status) {
+    const target = paperTargetClasses().find(c => String(c.id) === String(state.paper.targetClass));
+    const name = state.paper.name || ('未命名试卷 · ' + DB.today());
+    return {
+      id: state.paper.id || DB.uid('paper'), name: name, type: '蓝图组卷', qs: (state.paper.questions || []).length,
+      total: paperTotal(), date: DB.today(), updatedAt: DB.now(), status: status || '草稿',
+      questions: state.paper.questions || [], blueprint: ensurePaperBlueprint(), ctx: state.paper.ctx,
+      goal: state.paper.goal, targetClass: target ? target.name : (state.paper.targetClass || ''), targetClassId: target ? target.id : '',
+      schoolId: currentSchoolId(), ownerId: state.user && state.user.id, releaseMode: state.paper.releaseMode,
+      publishedAt: status === '已发布' ? DB.now() : undefined, publishedBy: status === '已发布' ? ((state.user && state.user.name) || '教师') : undefined
+    };
+  }
+
+  function persistPaperRecord(status) {
+    const paper = paperRecord(status);
+    state.paper.id = paper.id;
+    const papers = DB.collection('papers') || [];
+    const index = papers.findIndex(item => String(item.id) === String(paper.id));
+    if (index >= 0) papers[index] = paper; else papers.unshift(paper);
+    DB.saveCollection('papers');
+    DB.auditLog(status === '已发布' ? '发布试卷' : '保存试卷', '《' + paper.name + '》共 ' + paper.qs + ' 题', state.user && state.user.name);
+    return paper;
+  }
+
+  function renderPaper() {
+    const info = paperCtxInfo();
+    const stage = PAPER_STAGES.some(item => item.id === state.paper.stage) ? state.paper.stage : 'setup';
+    state.paper.stage = stage;
+    if (stage === 'blueprint' || stage === 'bank' || stage === 'review') ensurePaperBlueprint();
+    const index = PAPER_STAGES.findIndex(item => item.id === stage);
+    const steps = PAPER_STAGES.map((item, i) => '<button type="button" class="paper-step' + (item.id === stage ? ' is-active' : '') + (i < index ? ' is-done' : '') + '" data-paper-stage="' + item.id + '" aria-current="' + (item.id === stage ? 'step' : 'false') + '"><span>' + (i < index ? '✓' : String(i + 1).padStart(2, '0')) + '</span><b>' + item.label + '</b><small>' + item.hint + '</small></button>' + (i < PAPER_STAGES.length - 1 ? '<i class="paper-step-line"></i>' : '')).join('');
+    const content = stage === 'setup' ? paperStageSetup(info) : stage === 'blueprint' ? paperStageBlueprint() : stage === 'bank' ? paperStageBank() : paperStageReview();
+    const quality = paperQuality();
+    const html = '<div class="page paper-v2"><div class="paper-v2__head"><div><span class="page-kicker">命题工作台</span><h1 class="page-title">组卷</h1><p class="paper-v2__context">' + esc(info.gradeText + ' · ' + info.subjectText + ' · ' + (info.versionText || '教材版本')) + '</p></div><div class="paper-v2__head-status"><span class="tag tag-gray">草稿</span><span class="paper-autosave"><span class="status-dot green"></span>已自动保存</span></div></div><nav class="paper-stepper" aria-label="组卷进度">' + steps + '</nav><div class="paper-v2__grid">' + content + paperSummaryHtml() + '</div></div>';
+    renderPage(html);
+
+    /* 上下文与范围 */
+    const subject = $('#p2-subject'), grade = $('#p2-grade'), term = $('#p2-term'), version = $('#p2-version');
+    const rerenderContext = () => { state.paper.blueprint = []; savePaperDraft(); renderPaper(); };
+    if (subject) subject.onchange = () => { state.paper.ctx.subject = subject.value; const v = (M.TEXTBOOKS[subject.value].versions || []).find(x => x.default) || M.TEXTBOOKS[subject.value].versions[0]; state.paper.ctx.version = v ? v.id : ''; state.paper.checked.clear(); rerenderContext(); };
+    if (grade) grade.onchange = () => { state.paper.ctx.grade = Number(grade.value); rerenderContext(); };
+    if (term) term.onchange = () => { state.paper.ctx.term = term.value; savePaperDraft(); };
+    if (version) version.onchange = () => { state.paper.ctx.version = version.value; rerenderContext(); };
+    $$('[data-paper-goal]').forEach(btn => btn.onclick = () => { state.paper.goal = btn.dataset.paperGoal; $$('.paper-goal').forEach(x => x.classList.toggle('is-active', x === btn)); savePaperDraft(); });
+    const target = $('#paper-target');
+    if (target) target.onchange = () => { state.paper.targetClass = target.value; savePaperDraft(); };
+    const preset = $('#paper-preset');
+    if (preset) preset.onchange = () => { state.paper.preset = preset.value; state.paper.blueprint = []; ensurePaperBlueprint(); savePaperDraft(); renderPaper(); };
+    const addScope = (value) => {
+      const kp = String(value || '').trim();
+      if (!kp) return;
+      if (state.paper.checked.has(kp)) { showToast('该知识点已在范围中', 'info'); return; }
+      state.paper.checked.add(kp); savePaperDraft(); renderPaper();
+    };
+    const kpInput = $('#paper-kp-input');
+    const kpAdd = () => { if (kpInput) addScope(kpInput.value); };
+    if (kpInput) kpInput.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); kpAdd(); } };
+    const kpAddBtn = $('#paper-kp-add'); if (kpAddBtn) kpAddBtn.onclick = kpAdd;
+    $$('[data-paper-kp-suggest]').forEach(btn => btn.onclick = () => addScope(btn.dataset.paperKpSuggest));
+    $$('[data-paper-kp-remove]').forEach(btn => btn.onclick = () => { state.paper.checked.delete(btn.dataset.paperKpRemove); savePaperDraft(); renderPaper(); });
+
+    /* 步骤切换 */
+    $$('[data-paper-stage], [data-paper-next], [data-paper-back]').forEach(btn => btn.onclick = () => {
+      const next = btn.dataset.paperStage || btn.dataset.paperNext || btn.dataset.paperBack;
+      if (!next) return;
+      if (next !== 'setup' && !state.paper.checked.size) { showToast('先完成知识范围', 'error'); state.paper.stage = 'setup'; renderPaper(); return; }
+      state.paper.stage = next;
+      if (next === 'blueprint') ensurePaperBlueprint();
+      savePaperDraft(); renderPaper();
+    });
+
+    /* 蓝图编辑 */
+    $$('[data-blueprint]').forEach(input => input.onchange = () => {
+      const rowEl = input.closest('[data-blueprint-row]'); const row = state.paper.blueprint[Number(rowEl.dataset.blueprintRow)];
+      if (input.dataset.blueprint === 'count' || input.dataset.blueprint === 'points') row[input.dataset.blueprint] = Math.max(1, Number(input.value || 1));
+      else row[input.dataset.blueprint] = input.value;
+      savePaperDraft();
+      const nextStats = paperBlueprintStats(); const total = document.querySelector('.blueprint-total');
+      if (total) total.innerHTML = '<span>预计 ' + nextStats.count + ' 题 · ' + nextStats.score + ' 分 · ' + nextStats.time + ' 分钟</span><span>难度可在题库阶段继续筛选</span>';
+    });
+    $$('[data-blueprint-remove]').forEach(btn => btn.onclick = () => { state.paper.blueprint.splice(Number(btn.dataset.blueprintRemove), 1); savePaperDraft(); renderPaper(); });
+    const addBlueprint = $('#paper-blueprint-add');
+    if (addBlueprint) addBlueprint.onclick = () => { state.paper.blueprint.push({ id: 'bp_' + Date.now(), type: '选择题', count: 5, points: 2, diff: '中', mix: { 易: 0.3, 中: 0.5, 难: 0.2 } }); savePaperDraft(); renderPaper(); };
+    const autoBlueprint = $('#paper-blueprint-auto');
+    if (autoBlueprint) autoBlueprint.onclick = () => { state.paper.blueprint = paperBlueprintDefaults(); savePaperDraft(); renderPaper(); showToast('已套用当前学科推荐配比', 'success'); };
+
+    /* 题库筛选 */
+    const applyBankFilter = () => {
+      state.paper.bankFilter = { q: ($('#bank-q') && $('#bank-q').value) || '', type: ($('#bank-type') && $('#bank-type').value) || '全部题型', diff: ($('#bank-diff') && $('#bank-diff').value) || '全部难度', source: ($('#bank-source') && $('#bank-source').value) || '全部来源' };
+      savePaperDraft(); renderPaper();
+    };
+    const applyBank = $('#paper-bank-apply'); if (applyBank) applyBank.onclick = applyBankFilter;
+    const bankQ = $('#bank-q'); if (bankQ) bankQ.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); applyBankFilter(); } };
+    const genBtn = $('#ai-gen'); if (genBtn) genBtn.onclick = aiGenerate;
+    const genBlueprint = $('#gen-blueprint'); if (genBlueprint) genBlueprint.onclick = generateBlueprintPaper;
+
+    /* 试卷输出与发布 */
+    const nameInput = $('#paper-name');
+    if (nameInput) nameInput.oninput = e => { state.paper.name = e.target.value.trim(); const publish = $('#publish-paper'); const bottom = $('#publish-paper-bottom'); if (publish) publish.disabled = !(state.paper.name && state.paper.questions.length); if (bottom) bottom.disabled = !(state.paper.name && state.paper.questions.length); savePaperDraft(); };
+    const exportVer = $('#export-ver'); if (exportVer) exportVer.onchange = () => { state.paper.exportVer = exportVer.value; savePaperDraft(); };
+    const releaseMode = $('#release-mode'); if (releaseMode) releaseMode.onchange = () => { state.paper.releaseMode = releaseMode.value; savePaperDraft(); };
+    const saveBtn = $('#save-paper'); if (saveBtn) saveBtn.onclick = () => { if (!state.paper.questions.length) { showToast('还没有候选题', 'error'); return; } persistPaperRecord('草稿'); savePaperDraft(); showToast('草稿已保存', 'success'); };
+    const exportWord = $('#export-word'); if (exportWord) exportWord.onclick = () => window.PaperExport && window.PaperExport.downloadWord();
+    const exportPdf = $('#export-pdf'); if (exportPdf) exportPdf.onclick = () => window.PaperExport && window.PaperExport.openPrintPreview();
+    const exportGift = $('#export-gift'); if (exportGift) exportGift.onclick = () => {
+      if (!state.paper.questions.length) { showToast('试卷为空，无法导出', 'error'); return; }
+      const txt = window.AI.exportGift(state.paper.questions); const file = (state.paper.name || '未命名试卷') + '_GIFT.txt';
+      if (window.fhNativeSave && window.fhNativeSave(file, '\ufeff' + txt)) { showToast('GIFT 题库已导出', 'success'); return; }
+      const url = URL.createObjectURL(new Blob(['\ufeff', txt], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = file; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1200); showToast('GIFT 题库已导出', 'success');
+    };
+    const checkAll = $('#check-all'); if (checkAll) checkAll.onclick = () => { state.paper.questions.forEach(q => { if (q.type !== '资料') q.checked = true; }); savePaperDraft(); renderPaper(); showToast('已标记全部题目，仍建议抽查', 'success'); };
+    const publish = () => {
+      const quality = paperQuality();
+      if (!state.paper.name) { showToast('请先填写试卷名称', 'error'); return; }
+      if (!state.paper.questions.length) { showToast('还没有题目', 'error'); return; }
+      if (quality.unchecked || quality.answerMissing || quality.gaps) { showToast('请先完成复核，并补齐答案与蓝图题量', 'warning'); return; }
+      if (!state.paper.targetClass) { showToast('请选择投放班级', 'warning'); return; }
+      confirmDialog({ title: '发布到班级作业', body: '将《' + esc(state.paper.name) + '》发布到 <b>' + esc(paperTargetName()) + '</b>？', okText: '确认发布', onConfirm: () => { const paper = persistPaperRecord('已发布'); state.paper.stage = 'review'; savePaperDraft(); renderPaper(); showToast('已发布到 ' + paper.targetClass, 'success'); } });
+    };
+    const publishBtn = $('#publish-paper'); if (publishBtn) publishBtn.onclick = publish;
+    const publishBottom = $('#publish-paper-bottom'); if (publishBottom) publishBottom.onclick = publish;
+    const clear = $('#clear-paper'); if (clear) clear.onclick = () => confirmDialog({ title: '清空本次组卷', body: '将移除当前草稿中的全部候选题和蓝图。', danger: true, okText: '清空', onConfirm: () => { state.paper.questions = []; state.paper.name = ''; state.paper.blueprint = []; state.paper.stage = 'setup'; state.paper.id = ''; savePaperDraft(); renderPaper(); showToast('已清空本次组卷', 'success'); } });
+    bindQuestionActions();
+    savePaperDraft();
+  }
+
   function questionCard(q) {
     if (q.type === '资料') {
       return '<div class="q-card ref-card" data-qid="' + q.id + '">' +
@@ -2392,7 +2782,7 @@
   function emptyQ() {
     return '<div class="card"><div class="empty-state"><div class="es-icon">' + icon('paper', 34) + '</div>' +
       '<div style="font-size:14px;color:var(--text-2);margin-bottom:4px">暂无题目</div>' +
-      '<div>勾选左侧知识点后，点击「AI 生成」开始出题</div></div></div>';
+      '<div>完成知识范围与蓝图后，生成候选题进入这里</div></div></div>';
   }
 
   function showGenProgress(pct, text) {
@@ -2673,11 +3063,12 @@
   }
   function updatePanel() {
     if (!$('#q-list')) return;
-    $('#p-count').textContent = state.paper.questions.length;
-    $('#p-total').textContent = paperTotal();
-    $('#d-easy').textContent = diffCount('易');
-    $('#d-mid').textContent = diffCount('中');
-    $('#d-hard').textContent = diffCount('难');
+    const setText = (selector, value) => { const el = $(selector); if (el) el.textContent = value; };
+    setText('#p-count', state.paper.questions.length);
+    setText('#p-total', paperTotal());
+    setText('#d-easy', diffCount('易'));
+    setText('#d-mid', diffCount('中'));
+    setText('#d-hard', diffCount('难'));
     const timeEl = $('#p-time');
     if (timeEl) {
       const t = paperTimes();
@@ -2691,12 +3082,11 @@
       fills[1].style.width = diffPct('中') + '%';
       fills[2].style.width = diffPct('难') + '%';
     }
-    $('#export-word').disabled = !state.paper.questions.length;
-    $('#export-pdf').disabled = !state.paper.questions.length;
-    $('#export-gift').disabled = !state.paper.questions.length;
+    ['#export-word', '#export-pdf', '#export-gift'].forEach(selector => { const el = $(selector); if (el) el.disabled = !state.paper.questions.length; });
     const savePaperBtn = $('#save-paper');
     if (savePaperBtn) savePaperBtn.disabled = !state.paper.questions.length;
-    $('#publish-paper').disabled = !(state.paper.name && state.paper.questions.length);
+    const publish = $('#publish-paper');
+    if (publish) publish.disabled = !(state.paper.name && state.paper.questions.length);
   }
 
   /* ---------- 我的试卷 ---------- */
