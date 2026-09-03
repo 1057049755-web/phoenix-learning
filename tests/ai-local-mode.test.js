@@ -33,10 +33,19 @@ function loadAI(storage, fetchImpl) {
 (async () => {
   const storage = makeStorage();
   const calls = [];
+  const fakeModelCatalog = [
+    { id: 'glm-4-flash-250414', name: 'GLM-4-Flash', pricing: { prompt: 0, completion: 0 }, created: 1751328000 },
+    ...Array.from({ length: 500 }, (_, index) => ({
+      id: 'provider/model-' + String(index + 1).padStart(3, '0'),
+      name: 'Model ' + String(index + 1).padStart(3, '0'),
+      pricing: { prompt: '0.000001', completion: '0.000002' },
+      created: 1751328000
+    }))
+  ];
   const fakeFetch = async (url, options) => {
     calls.push({ url, options });
     if (String(url).endsWith('/models')) {
-      return { ok: true, json: async () => ({ data: [{ id: 'glm-4-flash-250414', name: 'GLM-4-Flash', pricing: { prompt: 0, completion: 0 } }] }) };
+      return { ok: true, json: async () => ({ data: fakeModelCatalog }) };
     }
     return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
   };
@@ -69,8 +78,10 @@ function loadAI(storage, fetchImpl) {
   assert.equal(models.ok, true);
   assert.equal(models.models[0].id, 'glm-4-flash-250414');
   assert.equal(models.models[0].pricing.prompt, 0);
+  assert.equal(models.models.length, 501, '官方模型目录不应被截断');
   const publicModels = await ai.listModels({ id: 'openrouter-public-catalog', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: '', apiKey: '' });
   assert.equal(publicModels.ok, true, 'OpenRouter 公共模型目录不应强制要求 API Key');
+  assert.equal(publicModels.models.length, 501, '公共模型目录应完整保留所有模型 ID');
 
   vm.runInNewContext(fs.readFileSync('assets/js/reference-data.js', 'utf8'), context, { filename: 'assets/js/reference-data.js' });
   await new Promise(resolve => setTimeout(resolve, 0));
