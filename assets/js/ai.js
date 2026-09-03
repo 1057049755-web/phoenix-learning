@@ -431,6 +431,14 @@
     if (/rerank/.test(id)) return 'rerank';
     return String(value.model_type || value.type || 'text');
   }
+  function isModelFrom2025(item) {
+    const raw = item && (item.created || item.created_at || item.createdAt);
+    if (raw == null || raw === '') return true;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return true;
+    const seconds = value > 100000000000 ? value / 1000 : value;
+    return seconds >= Date.parse('2025-01-01T00:00:00Z') / 1000;
+  }
   async function serverStatus() {
     const profile = activeProfile(true);
     const configured = !!(profile && profile.model && endpointFor(profile) && profile.apiKey);
@@ -503,11 +511,11 @@
       if (!res.ok) throw new Error((data.error && data.error.message) || ('模型列表返回 HTTP ' + res.status));
       const raw = Array.isArray(data) ? data : (Array.isArray(data.data) ? data.data : (Array.isArray(data.models) ? data.models : []));
       return { ok: true, models: raw.map(item => ({
-        id: String(item.id || item.name || ''), name: String(item.name || item.id || ''),
+        id: String(item.id || item.name || '').replace(/^models\//, ''), name: String(item.name || item.id || '').replace(/^models\//, ''),
         type: modelType(item), pricing: item.pricing || null,
         contextLength: Number(item.context_length || item.contextLength || 0) || null,
-        capabilities: item.capabilities || item.supported_parameters || []
-      })).filter(item => item.id).slice(0, 500), message: '模型列表已从官方接口更新' };
+        capabilities: item.capabilities || item.supported_parameters || [], created: item.created || item.created_at || item.createdAt || null
+      })).filter(item => item.id && isModelFrom2025(item)), message: '模型列表已从官方接口更新（2025 年至今）' };
     } catch (e) {
       const message = e && e.name === 'AbortError' ? '读取模型列表超时，请检查网络状态。' : e && e.name === 'TypeError'
         ? '浏览器无法读取该厂商的模型列表，可能是跨域限制；可以手动填写模型 ID。'

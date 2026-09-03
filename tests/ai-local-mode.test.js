@@ -24,7 +24,7 @@ function loadAI(storage, fetchImpl) {
     clearTimeout,
     fetch: fetchImpl,
     location: { origin: 'http://127.0.0.1:8080' },
-    window: { localStorage: storage, dispatchEvent() {} }
+    window: { localStorage: storage, dispatchEvent() {}, location: { origin: 'http://127.0.0.1:8080' } }
   };
   vm.runInNewContext(fs.readFileSync('assets/js/ai.js', 'utf8'), context, { filename: 'assets/js/ai.js' });
   return { context, ai: context.window.AI };
@@ -44,6 +44,8 @@ function loadAI(storage, fetchImpl) {
   const loaded = loadAI(storage, fakeFetch);
   const context = loaded.context;
   const ai = loaded.ai;
+  vm.runInNewContext(fs.readFileSync('assets/js/ai-local-hotfix-20260903.js', 'utf8'), context, { filename: 'assets/js/ai-local-hotfix-20260903.js' });
+  vm.runInNewContext(fs.readFileSync('assets/js/ai-model-catalog-hotfix-20260903-v2.js', 'utf8'), context, { filename: 'assets/js/ai-model-catalog-hotfix-20260903-v2.js' });
   assert.equal((await ai.serverStatus()).route, 'local');
   assert.equal(calls.length, 0, '本地状态检查不应请求后端');
 
