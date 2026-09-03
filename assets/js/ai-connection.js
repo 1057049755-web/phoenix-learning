@@ -212,16 +212,20 @@
       if (fallback && !items.some(function (item) { return item.providerModelId === fallback.providerModelId; })) items.push(fallback);
       return items;
     }
-    function modelMatches(item) {
-      var queryText = modelSearch.trim().toLowerCase();
+    function matchesModelType(item, filterValue) {
+      var filter = filterValue || 'all';
       var type = String(item.type || item.modelType || '').toLowerCase();
       var capabilities = Array.isArray(item.capabilities) ? item.capabilities.join(' ').toLowerCase() : String(item.capabilities || '').toLowerCase();
+      if (filter === 'vision') return /vision|image|multimodal|视觉/.test(type + ' ' + capabilities);
+      if (filter === 'embedding') return /embedding|embed|向量/.test(type + ' ' + capabilities);
+      if (filter === 'text') return !/embedding|embed|rerank|image|audio|speech/.test(type + ' ' + capabilities);
+      return true;
+    }
+    function modelMatches(item) {
+      var queryText = modelSearch.trim().toLowerCase();
       var haystack = String(item.providerModelId || '') + ' ' + String(item.officialName || '') + ' ' + String(item.name || '');
       if (queryText && haystack.toLowerCase().indexOf(queryText) < 0) return false;
-      if (modelFilter === 'vision' && !/vision|image|multimodal|视觉/.test(type + ' ' + capabilities)) return false;
-      if (modelFilter === 'embedding' && !/embedding|embed|向量/.test(type + ' ' + capabilities)) return false;
-      if (modelFilter === 'text' && /embedding|embed|rerank|image|audio|speech/.test(type + ' ' + capabilities)) return false;
-      return true;
+      return matchesModelType(item, modelFilter);
     }
     function renderModelChoices(providerId, selected) {
       var select = field('model');
@@ -229,8 +233,17 @@
       var toggle = query('[data-ai-manual-toggle]');
       if (!select) return;
       var allItems = modelItems(providerId).sort(function (a, b) { return String(a.officialName || a.providerModelId).localeCompare(String(b.officialName || b.providerModelId)); });
+      var filterSelect = query('[data-ai-model-filter]');
+      if (modelFilter !== 'all' && (!allItems.length || !allItems.some(function (item) { return matchesModelType(item, modelFilter); }))) modelFilter = 'all';
+      if (filterSelect) {
+        filterSelect.value = modelFilter;
+        Array.prototype.forEach.call(filterSelect.options, function (option) {
+          option.disabled = option.value !== 'all' && allItems.length > 0 && !allItems.some(function (item) { return matchesModelType(item, option.value); });
+        });
+      }
       var visibleItems = allItems.filter(modelMatches);
-      var options = '<option value="">' + (allItems.length ? '选择具体模型' : '暂无模型目录，请手动填写') + '</option>';
+      var emptyLabel = !allItems.length ? '暂无模型目录，请手动填写' : (visibleItems.length ? '选择具体模型' : '没有匹配模型，请修改搜索');
+      var options = '<option value="">' + emptyLabel + '</option>';
       if (visibleItems.length) options += visibleItems.map(function (item) { return '<option value="' + esc(item.providerModelId) + '">' + esc(item.officialName || item.providerModelId) + ' · ' + esc(item.providerModelId) + '</option>'; }).join('');
       if (selected && !visibleItems.some(function (item) { return item.providerModelId === selected; })) options += '<option value="' + esc(selected) + '">当前选择 · ' + esc(selected) + '</option>';
       select.innerHTML = options;
