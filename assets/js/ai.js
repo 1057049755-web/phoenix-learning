@@ -499,7 +499,7 @@
 
   async function listModels(input) {
     const profile = profileWithSecret(input || {});
-    if (profile.protocol === 'anthropic-messages') return { ok: false, models: [], message: 'Anthropic Messages 不提供通用模型列表，请手动填写模型 ID' };
+    if (profile.protocol === 'anthropic-messages') return { ok: false, models: [], message: 'Anthropic Messages 不提供通用模型目录，请使用官方支持模型目录的接口或选择其他服务商' };
     const baseUrl = stripEndpoint(profile.baseUrl || profile.endpoint);
     const publicCatalog = profile.provider === 'openrouter';
     if (!/^https:\/\//i.test(baseUrl) || (!profile.apiKey && !publicCatalog)) return { ok: false, models: [], message: '请先填写可用的 base URL 和 API Key；读取模型目录不要求先选择模型（OpenRouter 目录可公开读取）' };
@@ -518,7 +518,7 @@
       })).filter(item => item.id && isModelFrom2025(item)), message: '模型列表已从官方接口更新（2025 年至今）' };
     } catch (e) {
       const message = e && e.name === 'AbortError' ? '读取模型列表超时，请检查网络状态。' : e && e.name === 'TypeError'
-        ? '浏览器无法读取该厂商的模型列表，可能是跨域限制；可以手动填写模型 ID。'
+        ? '浏览器无法读取该厂商的模型列表，可能是跨域限制；请检查官方接口或更换支持跨域的服务商。'
         : String((e && e.message) || '读取模型列表失败');
       return { ok: false, models: [], message: message };
     }

@@ -40,7 +40,7 @@
           id: String(item.id || item.name || ''), name: String(item.name || item.id || ''), type: modelType(item),
           pricing: item.pricing || null, contextLength: Number(item.context_length || item.contextLength || 0) || null,
           capabilities: item.supported_parameters || item.capabilities || []
-        })).filter(item => item.id).slice(0, 500),
+        })).filter(item => item.id),
         message: 'OpenRouter 模型目录已公开读取'
       };
     } catch (error) {

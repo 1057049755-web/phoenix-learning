@@ -105,7 +105,7 @@
       const result = await loadModels(true);
       const registered = result.models.filter(item => !slug || item.providerId === slug || item.canonicalKey.indexOf(slug + ':') === 0);
       if (registered.length) return { ok: true, models: registered.map(item => ({ id: item.providerModelId, name: item.officialName, type: item.modelType, pricing: item.pricing, status: item.status })), message: '已读取官方模型目录；价格与状态来自最近一次服务商同步' };
-      return { ok: false, models: [], message: '该服务商暂无可用的官方模型记录，请先同步厂家目录或手动填写模型 ID' };
+      return { ok: false, models: [], message: '该服务商暂无可用的官方模型记录，请先同步厂家目录' };
     };
     listModels.__fhRegistryBridge = true;
     window.AI.listModels = listModels;

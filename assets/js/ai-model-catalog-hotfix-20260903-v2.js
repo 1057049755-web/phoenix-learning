@@ -72,7 +72,7 @@
       }).filter(item => item.id && recent(item.created));
       return { ok: true, models, message: '已载入 2025 年至今仍在官方目录中的 ' + models.length + ' 个模型' };
     } catch (error) {
-      const message = error && error.name === 'AbortError' ? '读取模型目录超时，请检查网络状态。' : error && error.name === 'TypeError' ? '浏览器无法跨域读取该官方模型目录，可以手动填写模型 ID。' : String(error && error.message || '读取模型目录失败');
+      const message = error && error.name === 'AbortError' ? '读取模型目录超时，请检查网络状态。' : error && error.name === 'TypeError' ? '浏览器无法跨域读取该官方模型目录，请检查官方接口或更换支持跨域的服务商。' : String(error && error.message || '读取模型目录失败');
       return { ok: false, models: [], message };
     } finally {
       clearTimeout(timer);

@@ -31,6 +31,10 @@ function loadAI(storage, fetchImpl) {
 }
 
 (async () => {
+  const connectionUi = fs.readFileSync('assets/js/ai-connection.js', 'utf8');
+  assert.match(connectionUi, /data-ai-field="model"/, '连接中心必须保留官方模型选择器');
+  assert.doesNotMatch(connectionUi, /data-ai-manual|manualMode|手动填写模型/, '连接中心不得保留手动模型入口');
+
   const storage = makeStorage();
   const calls = [];
   const fakeModelCatalog = [
@@ -82,6 +86,15 @@ function loadAI(storage, fetchImpl) {
   const publicModels = await ai.listModels({ id: 'openrouter-public-catalog', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: '', apiKey: '' });
   assert.equal(publicModels.ok, true, 'OpenRouter 公共模型目录不应强制要求 API Key');
   assert.equal(publicModels.models.length, 501, '公共模型目录应完整保留所有模型 ID');
+
+  const checked = await ai.testProfile(saved);
+  assert.equal(checked.ok, true, '已保存连接应可以直接执行检测');
+  const savedWithTest = ai.saveProfile(Object.assign({}, saved, {
+    apiKey: '',
+    lastTest: { ok: true, route: 'direct', message: '浏览器直连测试通过' }
+  }), { activate: true });
+  assert.equal(savedWithTest.hasKey, true, '保存空白 Key 时应保留已有 Key');
+  assert.equal(ai.getProfile(saved.id, true).lastTest.ok, true, '检测结果应随保存结果保留');
 
   vm.runInNewContext(fs.readFileSync('assets/js/reference-data.js', 'utf8'), context, { filename: 'assets/js/reference-data.js' });
   await new Promise(resolve => setTimeout(resolve, 0));
