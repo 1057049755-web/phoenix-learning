@@ -33,6 +33,8 @@ function loadAI(storage, fetchImpl) {
 (async () => {
   const connectionUi = fs.readFileSync('assets/js/ai-connection.js', 'utf8');
   assert.match(connectionUi, /data-ai-field="model"/, '连接中心必须保留官方模型选择器');
+  assert.match(connectionUi, /data-ai-field="model"[^>]*size="8"/, '模型名称应直接在可滚动列表中展示');
+  assert.doesNotMatch(connectionUi, /data-ai-model-search|modelSearch/, '连接中心不得保留模型搜索功能');
   assert.doesNotMatch(connectionUi, /data-ai-manual|manualMode|手动填写模型/, '连接中心不得保留手动模型入口');
 
   const storage = makeStorage();
