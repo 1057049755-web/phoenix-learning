@@ -282,6 +282,7 @@
       localModels = []; localModelsProvider = ''; manualMode = !defaultModelForProvider(provider);
       renderModelChoices(provider, defaultModelForProvider(provider));
       paintProviderMeta(provider); query('[data-ai-endpoint-preview]').textContent = endpointForDraft(draftFromForm()); query('[data-ai-editor-subtitle]').textContent = meta.name || '选择服务商';
+      if (provider === 'openrouter') window.setTimeout(readOfficialModels, 0);
     }
     function renderProfiles() {
       var list = query('[data-ai-profile-list]');
@@ -324,13 +325,13 @@
       var button = query('[data-ai-models]'); var value = draftFromForm();
       if (!value.baseUrl) { query('[data-ai-foot-status]').textContent = '请先选择服务商或填写 Base URL。'; return; }
       button.disabled = true; button.classList.add('is-loading'); button.querySelector('span').textContent = '读取中…'; query('[data-ai-foot-status]').textContent = '正在从所选服务商官方模型接口读取…';
-      try { var result = await window.AI.listModels(value); if (!result.ok) throw new Error(result.message || '官方模型列表读取失败'); localModels = result.models || []; localModelsProvider = value.provider; var chosen = value.model || defaultModelForProvider(value.provider) || (localModels[0] && localModels[0].id) || ''; manualMode = false; renderModelChoices(value.provider, chosen); query('[data-ai-foot-status]').textContent = '已从官方接口读取 ' + localModels.length + ' 个模型；价格以接口返回或官方定价页为准。'; notify('模型列表已更新', 'success'); }
+      try { var result = await window.AI.listModels(value); if (!result.ok) throw new Error(result.message || '官方模型列表读取失败'); localModels = result.models || []; localModelsProvider = value.provider; var chosen = value.model || defaultModelForProvider(value.provider) || ''; manualMode = false; renderModelChoices(value.provider, chosen); query('[data-ai-foot-status]').textContent = '已从官方接口读取 ' + localModels.length + ' 个模型；请选择要使用的模型。价格以接口返回或官方定价页为准。'; notify('模型列表已更新，请选择具体模型', 'success'); }
       catch (error) { query('[data-ai-foot-status]').textContent = error.message || '官方模型列表读取失败'; notify(error.message || '模型列表读取失败', 'error'); }
       finally { button.disabled = !canEdit; button.classList.remove('is-loading'); button.querySelector('span').textContent = '从官方读取'; }
     }
     function readModelsIfReady() {
       var profile = selectedId ? window.AI.getProfile(selectedId, true) : null;
-      if (profile && profile.apiKey && !localModels.length) readOfficialModels();
+      if (profile && (profile.apiKey || profile.provider === 'openrouter') && !localModels.length) readOfficialModels();
     }
     function close() { root.innerHTML = ''; }
 

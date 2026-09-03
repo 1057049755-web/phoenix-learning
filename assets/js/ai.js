@@ -419,6 +419,18 @@
     const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     return Array.isArray(content) ? content.map(item => item && (item.text || item.content) || '').join('').trim() : String(content || '').trim();
   }
+  function modelType(item) {
+    const value = item || {};
+    const architecture = value.architecture && typeof value.architecture === 'object' ? value.architecture : {};
+    const modalities = [].concat(architecture.output_modalities || [], value.output_modalities || []).map(x => String(x || '').toLowerCase()).join(' ');
+    const id = String(value.id || value.name || '').toLowerCase();
+    if (/image|vision|图像/.test(modalities + ' ' + id)) return 'image';
+    if (/audio|speech|语音/.test(modalities + ' ' + id)) return 'audio';
+    if (/video|视频/.test(modalities + ' ' + id)) return 'video';
+    if (/embedding|embed|向量/.test(modalities + ' ' + id)) return 'embedding';
+    if (/rerank/.test(id)) return 'rerank';
+    return String(value.model_type || value.type || 'text');
+  }
   async function serverStatus() {
     const profile = activeProfile(true);
     const configured = !!(profile && profile.model && endpointFor(profile) && profile.apiKey);
@@ -481,7 +493,8 @@
     const profile = profileWithSecret(input || {});
     if (profile.protocol === 'anthropic-messages') return { ok: false, models: [], message: 'Anthropic Messages 不提供通用模型列表，请手动填写模型 ID' };
     const baseUrl = stripEndpoint(profile.baseUrl || profile.endpoint);
-    if (!/^https:\/\//i.test(baseUrl) || !profile.apiKey) return { ok: false, models: [], message: '请先填写可用的 base URL 和 API Key；读取模型目录不要求先选择模型' };
+    const publicCatalog = profile.provider === 'openrouter';
+    if (!/^https:\/\//i.test(baseUrl) || (!profile.apiKey && !publicCatalog)) return { ok: false, models: [], message: '请先填写可用的 base URL 和 API Key；读取模型目录不要求先选择模型（OpenRouter 目录可公开读取）' };
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 12000);
     try {
@@ -491,7 +504,7 @@
       const raw = Array.isArray(data) ? data : (Array.isArray(data.data) ? data.data : (Array.isArray(data.models) ? data.models : []));
       return { ok: true, models: raw.map(item => ({
         id: String(item.id || item.name || ''), name: String(item.name || item.id || ''),
-        type: String(item.model_type || item.type || ''), pricing: item.pricing || null,
+        type: modelType(item), pricing: item.pricing || null,
         contextLength: Number(item.context_length || item.contextLength || 0) || null,
         capabilities: item.capabilities || item.supported_parameters || []
       })).filter(item => item.id).slice(0, 500), message: '模型列表已从官方接口更新' };

@@ -27,7 +27,7 @@ function loadAI(storage, fetchImpl) {
     window: { localStorage: storage, dispatchEvent() {} }
   };
   vm.runInNewContext(fs.readFileSync('assets/js/ai.js', 'utf8'), context, { filename: 'assets/js/ai.js' });
-  return context.window.AI;
+  return { context, ai: context.window.AI };
 }
 
 (async () => {
@@ -41,7 +41,9 @@ function loadAI(storage, fetchImpl) {
     return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
   };
 
-  const ai = loadAI(storage, fakeFetch);
+  const loaded = loadAI(storage, fakeFetch);
+  const context = loaded.context;
+  const ai = loaded.ai;
   assert.equal((await ai.serverStatus()).route, 'local');
   assert.equal(calls.length, 0, '本地状态检查不应请求后端');
 
@@ -65,8 +67,14 @@ function loadAI(storage, fetchImpl) {
   assert.equal(models.ok, true);
   assert.equal(models.models[0].id, 'glm-4-flash-250414');
   assert.equal(models.models[0].pricing.prompt, 0);
+  const publicModels = await ai.listModels({ id: 'openrouter-public-catalog', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: '', apiKey: '' });
+  assert.equal(publicModels.ok, true, 'OpenRouter 公共模型目录不应强制要求 API Key');
 
-  const refreshed = loadAI(storage, async () => ({ ok: false, json: async () => ({}) }));
+  vm.runInNewContext(fs.readFileSync('assets/js/reference-data.js', 'utf8'), context, { filename: 'assets/js/reference-data.js' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(context.window.AI.listModels.__fhRegistryBridge, undefined, '无后端时参考数据层不应覆盖浏览器直连模型目录');
+
+  const refreshed = loadAI(storage, async () => ({ ok: false, json: async () => ({}) })).ai;
   assert.equal(refreshed.getConfig().activeProfile.provider, 'openrouter');
   assert.equal(refreshed.getProfile(saved.id, true).apiKey, 'sk-local-test');
   assert.equal(refreshed.isConfigured(), true);
